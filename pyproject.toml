@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
     "tortoise-orm>=0.25.1",
+    "aiosqlite>=0.20.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "mypy>=1.13.0",
     "ruff>=0.8.0",
+    "pre-commit>=3.5.0",
 ]
 
 [build-system]
@@ -87,6 +89,23 @@ module = [
 ]
 ignore_missing_imports = true
 
+# Для файлов с Tortoise ORM моделями - разрешаем наследование от Any
+# и не предупреждаем о "unused" type: ignore (они нужны для полей)
+[[tool.mypy.overrides]]
+module = "src.database.models"
+disallow_subclassing_any = false
+warn_unused_ignores = false
+
+# Для файлов с aiogram handlers и middlewares - разрешаем untyped декораторы
+# и наследование от Any (для BaseMiddleware)
+[[tool.mypy.overrides]]
+module = [
+    "src.handlers.*",
+    "src.middlewares.*",
+]
+disallow_untyped_decorators = false
+disallow_subclassing_any = false
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
@@ -140,4 +159,3 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # unused imports in __init__ are ok
-

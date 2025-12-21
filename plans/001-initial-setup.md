@@ -24,7 +24,7 @@
    - asyncpg (PostgreSQL async driver)
    - aerich (миграции)
    - python-dotenv
-   
+
 5. **Создать docker-compose.yml** — PostgreSQL + бот (для разработки и продакшена)
 
 6. **Создать .env.example** — шаблон переменных окружения:
@@ -122,4 +122,3 @@ src/
 ---
 
 **Ожидаю подтверждения для начала реализации.**
-

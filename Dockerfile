@@ -21,10 +21,10 @@ RUN uv sync --no-dev
 # Копирование исходного кода
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY healthcheck.py ./healthcheck.py
 
 # Создание директории для логов
 RUN mkdir -p /app/logs
 
 # Команда запуска
 CMD ["uv", "run", "python", "-m", "src.bot"]
-

@@ -36,7 +36,10 @@
 - **uv** — быстрый менеджер зависимостей Python (альтернатива pip/poetry).
 - **MyPy 1.13+** — статическая проверка типов для строгой типизации.
 - **Ruff 0.8+** — быстрый линтер и форматтер кода (замена Black + Flake8 + isort).
+- **pre-commit 3.5+** — автоматические проверки кода перед коммитом.
+- **pytest 8.0+** — фреймворк для тестирования.
 - **Git** — контроль версий.
+- **Makefile** — удобные команды для разработки.
 
 ---
 
@@ -101,18 +104,18 @@ class Lead(Model):
     username = CharField(max_length=255, null=True)  # @username (если есть)
     first_name = CharField(max_length=255, null=True)
     last_name = CharField(max_length=255, null=True)
-    
+
     # Квалификация
     status = CharEnumField(LeadStatus, default=LeadStatus.NEW)  # NEW, COLD, WARM, HOT
     task = TextField(null=True)  # Какая задача у лида
     budget = CharField(max_length=255, null=True)  # Бюджет (строка, т.к. может быть "до 50к")
     deadline = CharField(max_length=255, null=True)  # Когда нужно решить
-    
+
     # Метаданные
     created_at = DatetimeField(auto_now_add=True)
     updated_at = DatetimeField(auto_now=True)
     last_message_at = DatetimeField(null=True)  # Последнее сообщение от лида
-    
+
     # Связи
     conversations: ReverseRelation["Conversation"]
     meetings: ReverseRelation["Meeting"]
@@ -134,10 +137,10 @@ class Lead(Model):
 class Conversation(Model):
     id = IntField(pk=True)
     lead = ForeignKeyField("models.Lead", related_name="conversations", on_delete=CASCADE)
-    
+
     role = CharEnumField(MessageRole)  # USER (лид) или ASSISTANT (бот)
     content = TextField()  # Текст сообщения
-    
+
     created_at = DatetimeField(auto_now_add=True)
 ```
 
@@ -160,11 +163,11 @@ class Conversation(Model):
 class Meeting(Model):
     id = IntField(pk=True)
     lead = ForeignKeyField("models.Lead", related_name="meetings", on_delete=CASCADE)
-    
+
     scheduled_at = DatetimeField()  # Дата и время встречи
     status = CharEnumField(MeetingStatus, default=MeetingStatus.SCHEDULED)
     notes = TextField(null=True)  # Дополнительные заметки
-    
+
     created_at = DatetimeField(auto_now_add=True)
     updated_at = DatetimeField(auto_now=True)
 ```
@@ -208,11 +211,11 @@ class Meeting(Model):
 async def generate_response(lead: Lead, message: str) -> dict:
     """
     Генерирует ответ бота и оценивает статус лида.
-    
+
     Args:
         lead: Объект лида из БД
         message: Последнее сообщение от лида
-    
+
     Returns:
         {
             "response": "Текст ответа бота",
@@ -482,21 +485,117 @@ aerich upgrade
 
 ---
 
-## 13. Тестирование (на будущее, после MVP)
+## 13. Тестирование
 
-### Типы тестов:
-- **Unit-тесты**: `services/llm.py`, `services/qualifier.py`.
-- **Integration-тесты**: полный flow (лид → диалог → квалификация → уведомление).
-- **E2E-тесты**: эмуляция Telegram пользователя через aiogram testing utils.
+### Структура тестов
 
-### Инструменты:
-- `pytest`
-- `pytest-asyncio`
-- `pytest-cov` (покрытие)
+Проект использует **pytest** для тестирования. Все тесты находятся в папке `tests/`.
+
+```
+tests/
+├── __init__.py
+├── conftest.py              # Фикстуры и настройки pytest
+├── test_config.py           # Тесты конфигурации
+├── test_models.py           # Тесты моделей БД
+└── test_types.py            # Тесты типов данных
+```
+
+### Запуск тестов
+
+```bash
+# Через Makefile (рекомендуется)
+make test              # Все тесты
+make test-cov          # С покрытием кода
+
+# Напрямую через pytest
+uv run pytest tests/ -v
+uv run pytest tests/ -v --cov=src --cov-report=html
+```
+
+### Типы тестов
+
+#### Текущие тесты (MVP):
+- ✅ **Unit-тесты**: конфигурация, модели БД, типы данных
+- ✅ **Database-тесты**: CRUD операции, валидация, связи
+
+#### Будущие тесты (после MVP):
+- 🔄 **Service-тесты**: `services/llm.py`, `services/qualifier.py` (с моками)
+- 🔄 **Integration-тесты**: полный flow (лид → диалог → квалификация → уведомление)
+- 🔄 **E2E-тесты**: эмуляция Telegram пользователя через aiogram testing utils
+
+### Инструменты
+
+- **pytest 8.0+** — основной фреймворк
+- **pytest-asyncio 0.24+** — поддержка async/await
+- **pytest-cov 4.1+** — покрытие кода
+- **SQLite in-memory** — быстрая тестовая БД (через conftest.py)
+
+### Конфигурация
+
+Настройки pytest в `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+```
 
 ---
 
-## 14. Типизация и качество кода
+## 14. Инструменты разработки
+
+### Makefile
+
+Проект использует **Makefile** для удобства разработки. Все основные команды доступны через `make`:
+
+```bash
+make help              # Показать все команды
+make setup             # Полная настройка окружения
+make run               # Запустить бота
+make check             # Проверить код (lint + type-check)
+make test              # Запустить тесты
+make migrate           # Применить миграции
+make docker-up         # Запустить в Docker
+```
+
+**Преимущества:**
+- Короткие команды вместо длинных `uv run ...`
+- Единообразный интерфейс для всех операций
+- Цветной вывод для удобства
+- Автоматическая проверка окружения
+
+Полный список команд: `make help` или см. `docs/development.md`.
+
+### Pre-commit Hooks
+
+Автоматическая проверка кода **перед каждым коммитом**.
+
+**Установка:**
+```bash
+make install-hooks
+```
+
+**Что проверяется:**
+- Форматирование (Ruff format)
+- Линтинг (Ruff check) с автофиксом
+- Проверка типов (MyPy) для src/
+- Trailing whitespace
+- Валидация YAML/TOML/JSON
+- Debug statements (breakpoint, pdb)
+- Большие файлы (>1MB)
+- Merge конфликты
+
+**Конфигурация:** `.pre-commit-config.yaml`
+
+**Ручной запуск:**
+```bash
+uv run pre-commit run --all-files
+```
+
+---
+
+## 15. Типизация и качество кода
 
 ### MyPy - Статическая проверка типов
 
@@ -571,7 +670,71 @@ class LLMResponse(TypedDict):
 
 ---
 
-## 15. Технический долг (на будущее)
+## 16. Healthcheck и мониторинг
+
+### Docker Healthcheck
+
+Проект использует healthcheck для мониторинга работоспособности сервисов:
+
+#### База данных (PostgreSQL)
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U salesbot"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+```
+
+#### Бот
+```yaml
+healthcheck:
+  test: ["CMD", "python", "/app/healthcheck.py"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+```
+
+**Healthcheck скрипт** (`healthcheck.py`):
+- Проверяет существование log файла
+- Проверяет, что лог не пустой (бот пишет логи = работает)
+- В продакшене можно расширить проверкой через Bot API (getMe)
+
+**Просмотр статуса:**
+```bash
+docker-compose ps
+```
+
+Статусы:
+- `healthy` — сервис работает нормально
+- `starting` — запускается (grace period)
+- `unhealthy` — проблемы после 3 неудачных попыток
+
+### Логи
+
+Все сообщения логируются через `utils/logger.py`:
+- Формат: `[TIMESTAMP] [LEVEL] [MODULE] Message`
+- Сохраняются в `logs/bot.log` через `RotatingFileHandler`
+- В Docker: volume `./logs:/app/logs`
+
+**Просмотр логов:**
+```bash
+# Локально
+tail -f logs/bot.log
+
+# Docker
+make docker-logs
+docker-compose logs -f bot
+```
+
+### Мониторинг (на будущее)
+- Sentry для отслеживания ошибок
+- Prometheus + Grafana для метрик
+- Uptime monitoring через healthcheck endpoints
+
+---
+
+## 17. Технический долг (на будущее)
 
 - [ ] Webhook вместо Long Polling (для продакшена).
 - [ ] Кэширование частых запросов (Redis).
@@ -584,4 +747,3 @@ class LLMResponse(TypedDict):
 ---
 
 **Документ актуален**: 21.12.2025
-

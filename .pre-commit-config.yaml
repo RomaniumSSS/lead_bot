@@ -1,0 +1,74 @@
+# Pre-commit hooks для автоматической проверки кода перед коммитом
+# Установка: make install-hooks или uv run pre-commit install
+# Ручной запуск: uv run pre-commit run --all-files
+
+repos:
+  # Базовые проверки
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Удаление trailing whitespace
+      - id: end-of-file-fixer
+        name: Проверка конца файла
+      - id: check-yaml
+        name: Проверка YAML файлов
+      - id: check-toml
+        name: Проверка TOML файлов
+      - id: check-json
+        name: Проверка JSON файлов
+      - id: check-added-large-files
+        name: Проверка больших файлов
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+        name: Проверка merge конфликтов
+      - id: debug-statements
+        name: Проверка debug statements (breakpoint, pdb)
+      - id: check-docstring-first
+        name: Проверка порядка docstrings
+
+  # Ruff - линтинг и форматирование
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Линтинг
+      - id: ruff
+        name: Ruff lint
+        args: ['--fix', '--exit-non-zero-on-fix']
+      # Форматирование
+      - id: ruff-format
+        name: Ruff format
+
+  # MyPy - проверка типов
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: MyPy type checking
+        args: ['--config-file=pyproject.toml']
+        additional_dependencies:
+          - 'pydantic>=2.0'
+          - 'pydantic-settings>=2.0'
+          - 'types-python-dateutil'
+          - 'anthropic>=0.40.0'
+        # Проверяем только src/, а не tests/ (в tests могут быть моки)
+        files: ^src/
+        exclude: ^tests/
+
+  # Проверка commit message (опционально)
+  # - repo: https://github.com/commitizen-tools/commitizen
+  #   rev: v3.13.0
+  #   hooks:
+  #     - id: commitizen
+  #       stages: [commit-msg]
+
+# Настройки
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
