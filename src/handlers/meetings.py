@@ -3,9 +3,12 @@
 from datetime import datetime, timedelta
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src.database.models import Lead, Meeting, MeetingStatus
+from src.handlers.states import ConversationState
+from src.services.llm import parse_custom_meeting_time
 from src.services.notifier import notify_owner_meeting_scheduled
 from src.utils.logger import logger
 
@@ -135,7 +138,7 @@ def _generate_meeting_slots() -> list[datetime]:
 
 
 @router.callback_query(F.data.startswith("meeting:"))
-async def handle_meeting_selection(callback: CallbackQuery) -> None:  # noqa: PLR0911, PLR0912
+async def handle_meeting_selection(callback: CallbackQuery, state: FSMContext) -> None:  # noqa: PLR0911, PLR0912
     """
     Обрабатывает выбор времени встречи лидом.
 
@@ -179,7 +182,11 @@ async def handle_meeting_selection(callback: CallbackQuery) -> None:  # noqa: PL
             "Напишите, когда вам удобно.\n\nНапример: «в среду в 11:00» или «28 декабря, 14:00»"
         )
         await callback.answer()
-        logger.info(f"Лид {lead.id} выбрал своё время")
+        # Устанавливаем state для ожидания ввода времени
+        await state.set_state(ConversationState.MEETING_CUSTOM_TIME)
+        # Сохраняем lead_id в state data
+        await state.update_data(lead_id=lead.id)
+        logger.info(f"Лид {lead.id} выбрал своё время, ожидаем ввода")
         return
 
     if slot == "next_week":
@@ -224,6 +231,92 @@ async def handle_meeting_selection(callback: CallbackQuery) -> None:  # noqa: PL
     logger.info(f"Создана встреча {meeting.id} для лида {lead.id} на {scheduled_at}")
 
     # Уведомляем владельца о встрече
+    try:
+        await notify_owner_meeting_scheduled(lead, meeting)
+    except Exception as e:
+        logger.error(f"Ошибка при уведомлении владельца о встрече {meeting.id}: {e}")
+
+
+@router.message(ConversationState.MEETING_CUSTOM_TIME)
+async def handle_custom_meeting_time(message: Message, state: FSMContext) -> None:
+    """
+    Обрабатывает ввод произвольного времени встречи от лида.
+
+    Использует Claude API для парсинга естественного языка в datetime.
+    """
+    if not message.text:
+        await message.answer("Пожалуйста, напишите время встречи текстом.")
+        return
+
+    # Получаем lead_id из state data
+    data = await state.get_data()
+    lead_id = data.get("lead_id")
+
+    if not lead_id:
+        await message.answer("Ошибка: не найден ID лида. Попробуйте начать заново.")
+        await state.clear()
+        return
+
+    # Загружаем лида
+    lead = await Lead.get_or_none(id=lead_id)
+    if not lead:
+        await message.answer("Ошибка: лид не найден.")
+        await state.clear()
+        return
+
+    # Показываем индикатор "печатает..."
+    if message.bot:
+        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
+    # Парсим время через Claude
+    parsed = await parse_custom_meeting_time(message.text)
+
+    if not parsed:
+        await message.answer(
+            "Не смог понять время 😕\n\n"
+            "Попробуйте указать по-другому, например:\n"
+            "• «завтра в 15:00»\n"
+            "• «в пятницу в 10:00»\n"
+            "• «25 декабря, 14:00»"
+        )
+        return
+
+    # Конвертируем в datetime
+    try:
+        date_str = parsed["date"]
+        time_str = parsed["time"]
+        scheduled_at = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")  # noqa: DTZ007
+    except (ValueError, KeyError) as e:
+        logger.error(f"Ошибка парсинга даты/времени: {e}")
+        await message.answer("Ошибка обработки времени. Попробуйте ещё раз.")
+        return
+
+    # Проверяем, что время в будущем
+    now = datetime.now()  # noqa: DTZ005
+    if scheduled_at < now:
+        await message.answer("Это время уже прошло 🕐\n\nУкажите время в будущем, пожалуйста.")
+        return
+
+    # Создаём встречу
+    meeting = await Meeting.create(
+        lead=lead, scheduled_at=scheduled_at, status=MeetingStatus.SCHEDULED
+    )
+
+    # Форматируем время для отображения
+    time_str_display = f"{_format_date_ru(scheduled_at)}, {scheduled_at.strftime('%H:%M')}"
+
+    await message.answer(
+        f"Отлично! Звонок назначен: {time_str_display}.\n\n"
+        f"Владелец свяжется с вами в Telegram.\n\n"
+        f"Если что-то изменится — напишите."
+    )
+
+    # Очищаем state
+    await state.clear()
+
+    logger.info(f"Создана встреча {meeting.id} для лида {lead.id} на {scheduled_at} (custom time)")
+
+    # Уведомляем владельца
     try:
         await notify_owner_meeting_scheduled(lead, meeting)
     except Exception as e:

@@ -61,6 +61,7 @@ class Lead(Model):
     created_at = fields.DatetimeField(auto_now_add=True, description="Дата создания")
     updated_at = fields.DatetimeField(auto_now=True, description="Дата обновления")
     last_message_at = fields.DatetimeField(null=True, description="Последнее сообщение от лида")
+    follow_up_count = fields.IntField(default=0, description="Количество отправленных follow-up")
 
     # Связи (reverse relations)
     # AICODE-NOTE: ReverseRelation типизируется через QuerySet для корректной работы с MyPy

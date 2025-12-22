@@ -1,6 +1,6 @@
 """Handler для команд /start, /help и /restart."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -34,6 +34,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
 
     # Получаем или создаём лида
+    now = datetime.now(tz=UTC)
     lead, created = await Lead.get_or_create(
         telegram_id=telegram_id,
         defaults={
@@ -41,7 +42,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             "first_name": first_name,
             "last_name": last_name,
             "status": LeadStatus.NEW,
-            "last_message_at": datetime.utcnow(),
+            "last_message_at": now,
+            "follow_up_count": 0,
         },
     )
 
@@ -50,7 +52,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         lead.username = username
         lead.first_name = first_name
         lead.last_name = last_name
-        lead.last_message_at = datetime.utcnow()
+        lead.last_message_at = now
+        lead.follow_up_count = 0  # Сбрасываем счётчик follow-up при новом /start
         # AICODE-NOTE: НЕ сбрасываем статус — чтобы избежать дублирования уведомлений.
         # Сбрасываем только данные квалификации для нового прохода flow.
         lead.task = None

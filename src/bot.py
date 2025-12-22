@@ -12,6 +12,7 @@ from src.config import settings
 from src.database.config import TORTOISE_ORM
 from src.handlers import register_all_handlers
 from src.middlewares.logging import LoggingMiddleware
+from src.services.scheduler import run_scheduler
 from src.utils.logger import logger
 
 
@@ -64,6 +65,11 @@ async def main() -> None:
     try:
         # Startup
         await on_startup()
+
+        # Запуск scheduler в фоне
+        # AICODE-NOTE: Сохраняем ссылку на task, чтобы избежать garbage collection
+        _scheduler_task = asyncio.create_task(run_scheduler(bot))  # noqa: RUF006
+        logger.info("✅ Планировщик follow-up запущен в фоне")
 
         # Запуск polling
         logger.info("✅ Бот запущен! Ожидание сообщений...")

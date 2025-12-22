@@ -1,6 +1,6 @@
 """Handler для структурированного диалога с лидами через FSM."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -26,6 +26,23 @@ from src.types import LLMResponse
 from src.utils.logger import logger
 
 router = Router(name="conversation")
+
+
+# =============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# =============================================================================
+
+
+async def _update_last_message_time(lead: Lead) -> None:
+    """
+    Обновляет время последнего сообщения от лида и сбрасывает счётчик follow-up.
+
+    Args:
+        lead: Объект лида
+    """
+    lead.last_message_at = datetime.now(tz=UTC)
+    lead.follow_up_count = 0  # Сбрасываем счётчик, т.к. лид ответил
+    await lead.save()
 
 
 # =============================================================================
@@ -98,8 +115,7 @@ async def handle_task_callback(callback: CallbackQuery, state: FSMContext) -> No
     lead = await Lead.get_or_none(telegram_id=callback.from_user.id)
     if lead:
         lead.task = task
-        lead.last_message_at = datetime.utcnow()
-        await lead.save()
+        await _update_last_message_time(lead)
 
         await Conversation.create(
             lead=lead,
@@ -147,8 +163,7 @@ async def handle_budget_callback(callback: CallbackQuery, state: FSMContext) -> 
     lead = await Lead.get_or_none(telegram_id=callback.from_user.id)
     if lead:
         lead.budget = budget
-        lead.last_message_at = datetime.utcnow()
-        await lead.save()
+        await _update_last_message_time(lead)
 
         await Conversation.create(
             lead=lead,
@@ -204,7 +219,7 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
 
     # Сохраняем срок в БД
     lead.deadline = deadline
-    lead.last_message_at = datetime.utcnow()
+    await _update_last_message_time(lead)
 
     await Conversation.create(
         lead=lead,
@@ -350,8 +365,7 @@ async def handle_task_custom_input(message: Message, state: FSMContext) -> None:
     lead = await Lead.get_or_none(telegram_id=message.from_user.id)
     if lead:
         lead.task = task
-        lead.last_message_at = datetime.utcnow()
-        await lead.save()
+        await _update_last_message_time(lead)
 
         # Сохраняем в историю диалога
         await Conversation.create(
@@ -389,8 +403,7 @@ async def handle_free_chat(message: Message, _state: FSMContext) -> None:
         return
 
     # Обновляем время последнего сообщения
-    lead.last_message_at = datetime.utcnow()
-    await lead.save()
+    await _update_last_message_time(lead)
 
     # Сохраняем сообщение в историю
     await Conversation.create(
@@ -447,8 +460,7 @@ async def handle_message_without_state(message: Message, state: FSMContext) -> N
 
         # Сохраняем сообщение если лид существует
         if lead:
-            lead.last_message_at = datetime.utcnow()
-            await lead.save()
+            await _update_last_message_time(lead)
             await Conversation.create(
                 lead=lead,
                 role=MessageRole.USER,

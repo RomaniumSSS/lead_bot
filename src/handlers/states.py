@@ -24,5 +24,6 @@ class ConversationState(StatesGroup):
     # Этап 5: Свободный диалог после квалификации
     FREE_CHAT = State()
 
-    # Дополнительный state: ожидание ввода своей задачи
-    TASK_CUSTOM_INPUT = State()
+    # Дополнительные states: ожидание пользовательского ввода
+    TASK_CUSTOM_INPUT = State()  # Ожидание ввода своей задачи
+    MEETING_CUSTOM_TIME = State()  # Ожидание ввода своего времени встречи

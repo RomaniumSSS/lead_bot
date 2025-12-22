@@ -1,10 +1,19 @@
 """Интеграция с Anthropic Claude API для генерации ответов и квалификации лидов."""
 
 import json
+import logging
 from typing import Literal, cast
 
-from anthropic import AsyncAnthropic
+from anthropic import APIStatusError, AsyncAnthropic, RateLimitError
+from anthropic.types import Message as AnthropicMessage
 from anthropic.types import MessageParam, TextBlock
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config import settings
 from src.database.models import Conversation, Lead, LeadStatus
@@ -21,6 +30,70 @@ MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4.5"
 
 # AICODE-NOTE: Ограничиваем количество сообщений истории для экономии токенов
 MAX_HISTORY_MESSAGES = 10
+
+
+@retry(  # type: ignore[misc]
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception_type((RateLimitError, APIStatusError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+async def _call_claude(  # noqa: PLR0913
+    client: AsyncAnthropic,
+    model: str,
+    max_tokens: int,
+    system: str,
+    messages: list[MessageParam],
+    *,
+    use_cache: bool = True,
+) -> AnthropicMessage:
+    """
+    Вызывает Claude API с автоматическими retry при ошибках.
+
+    Retry срабатывает при:
+    - RateLimitError (429) — превышен лимит запросов
+    - APIStatusError (500+) — ошибки сервера
+
+    Стратегия retry: exponential backoff (2s, 4s, 8s, ..., до 30s).
+    Максимум 3 попытки.
+
+    Args:
+        client: AsyncAnthropic клиент
+        model: Модель Claude
+        max_tokens: Максимум токенов в ответе
+        system: Системный промпт (строка или список блоков)
+        messages: История диалога
+        use_cache: Использовать ли prompt caching (по умолчанию True)
+
+    Returns:
+        AnthropicMessage с ответом от Claude
+
+    Raises:
+        RateLimitError: После 3 неудачных попыток при rate limit
+        APIStatusError: После 3 неудачных попыток при ошибке сервера
+    """
+    # AICODE-NOTE: Prompt caching экономит до 90% токенов на системном промпте.
+    # Кэш живёт 5 минут. При повторных запросах Claude использует закэшированный промпт.
+    if use_cache:
+        system_blocks = [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        return await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_blocks,  # type: ignore[arg-type]
+            messages=messages,
+        )
+    return await client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        system=system,
+        messages=messages,
+    )
 
 
 async def generate_response_free_chat(lead: Lead, message: str) -> LLMResponse:
@@ -104,8 +177,9 @@ async def generate_response_free_chat(lead: Lead, message: str) -> LLMResponse:
 """
 
     try:
-        # Запрос к Claude API с ограниченными токенами
-        response = await client.messages.create(
+        # Запрос к Claude API с ограниченными токенами и retry
+        response = await _call_claude(
+            client=client,
             model=MODEL,
             max_tokens=256,  # AICODE-NOTE: Ограничиваем до 256 для коротких ответов
             system=system_prompt,
@@ -119,7 +193,15 @@ async def generate_response_free_chat(lead: Lead, message: str) -> LLMResponse:
 
         response_text: str = first_block.text
 
-        logger.info(f"Claude FREE_CHAT для лида {lead.id}: {response_text[:100]}")
+        # Логируем использование кэша (если есть)
+        usage = response.usage
+        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
+            logger.info(
+                f"Claude FREE_CHAT для лида {lead.id}: cache hit "
+                f"({usage.cache_read_input_tokens} cached tokens)"
+            )
+        else:
+            logger.info(f"Claude FREE_CHAT для лида {lead.id}: {response_text[:100]}")
 
         # Парсим и возвращаем JSON ответ
         return _parse_llm_response(response_text, lead.status)
@@ -152,8 +234,6 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
             - status: LeadStatus - Оценка статуса лида
             - action: Literal["continue", "schedule_meeting", "send_materials"]
     """
-    # AICODE-TODO: Добавить кэширование системного промпта для экономии токенов
-
     # Загружаем историю диалога (ограничиваем количество)
     conversation_history: list[Conversation] = (
         await Conversation.filter(lead=lead).order_by("-created_at").limit(MAX_HISTORY_MESSAGES)
@@ -218,8 +298,9 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
 """
 
     try:
-        # Запрос к Claude API
-        response = await client.messages.create(
+        # Запрос к Claude API с retry
+        response = await _call_claude(
+            client=client,
             model=MODEL,
             max_tokens=256,  # AICODE-NOTE: Уменьшено с 1024 до 256 для коротких ответов
             system=system_prompt,
@@ -234,7 +315,15 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
 
         response_text: str = first_block.text
 
-        logger.info(f"Claude response для лида {lead.id}: {response_text[:100]}")
+        # Логируем использование кэша (если есть)
+        usage = response.usage
+        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
+            logger.info(
+                f"Claude response для лида {lead.id}: cache hit "
+                f"({usage.cache_read_input_tokens} cached tokens)"
+            )
+        else:
+            logger.info(f"Claude response для лида {lead.id}: {response_text[:100]}")
 
         # Парсим JSON ответ
         return _parse_llm_response(response_text, lead.status)
@@ -242,14 +331,112 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
     except Exception as e:
         logger.error(f"Ошибка при запросе к Claude API: {e}", exc_info=True)
 
-        # AICODE-TODO: Добавить retry с exponential backoff для 429/500 ошибок
-
         # Fallback ответ
         return {
             "response": "Понял вас! Расскажите подробнее, чтобы я мог лучше помочь.",
             "status": LeadStatus.NEW,
             "action": "continue",
         }
+
+
+async def parse_custom_meeting_time(text: str) -> dict[str, str] | None:
+    """
+    Парсит произвольное время встречи через Claude API.
+
+    Примеры входных данных:
+    - "завтра в 15:00"
+    - "в среду в 11:00"
+    - "28 декабря, 14:00"
+
+    Args:
+        text: Текст от пользователя с описанием времени
+
+    Returns:
+        dict с полями date (YYYY-MM-DD) и time (HH:MM) или None если не удалось распарсить
+    """
+    from datetime import UTC, datetime
+
+    now = datetime.now(tz=UTC)
+    weekdays_ru = [
+        "понедельник",
+        "вторник",
+        "среда",
+        "четверг",
+        "пятница",
+        "суббота",
+        "воскресенье",
+    ]
+    current_weekday = weekdays_ru[now.weekday()]
+
+    prompt = f"""Сегодня: {current_weekday}, {now.day} {now.strftime('%B')} {now.year} года.
+Текущее время: {now.strftime('%H:%M')}.
+
+Пользователь написал: "{text}"
+
+Твоя задача: определить дату и время встречи.
+
+**ВАЖНО:**
+- Если указан день недели (например, "в среду") — найди ближайшую среду от сегодня.
+- Если указано "завтра" — это {(now.day + 1)} число.
+- Если указана конкретная дата — используй её.
+- Время должно быть в формате HH:MM (24-часовой формат).
+
+Верни ТОЛЬКО JSON в формате:
+{{
+    "date": "YYYY-MM-DD",
+    "time": "HH:MM",
+    "success": true
+}}
+
+Если не удалось распознать дату или время, верни:
+{{
+    "success": false,
+    "reason": "Краткое объяснение проблемы"
+}}
+
+Примеры:
+- "завтра в 15:00" → {{"date": "2025-12-24", "time": "15:00", "success": true}}
+- "в пятницу в 10:00" → {{"date": "2025-12-27", "time": "10:00", "success": true}}
+- "не знаю" → {{"success": false, "reason": "Не указано время"}}
+"""
+
+    try:
+        response = await _call_claude(
+            client=client,
+            model=MODEL,
+            max_tokens=128,
+            system="Ты — помощник для парсинга дат и времени из естественного языка.",
+            messages=[{"role": "user", "content": prompt}],
+            use_cache=False,  # Не кэшируем, т.к. промпт меняется (текущая дата)
+        )
+
+        first_block = response.content[0]
+        if not isinstance(first_block, TextBlock):
+            logger.error(f"Claude вернул неожиданный тип блока: {type(first_block)}")
+            return None
+
+        response_text = first_block.text.strip()
+
+        # Очищаем от markdown
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        parsed = json.loads(response_text)
+
+        if not parsed.get("success"):
+            logger.warning(f"Claude не смог распарсить время: {parsed.get('reason')}")
+            return None
+
+        return {"date": parsed["date"], "time": parsed["time"]}
+
+    except Exception as e:
+        logger.error(f"Ошибка при парсинге времени через Claude: {e}", exc_info=True)
+        return None
 
 
 def _parse_llm_response(response_text: str, default_status: LeadStatus) -> LLMResponse:
