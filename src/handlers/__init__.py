@@ -3,6 +3,7 @@
 from aiogram import Router
 
 from src.handlers import admin, conversation, meetings, start
+from src.handlers.states import ConversationState
 
 
 def register_all_handlers(router: Router) -> None:
@@ -19,4 +20,4 @@ def register_all_handlers(router: Router) -> None:
     router.include_router(conversation.router)
 
 
-__all__ = ["register_all_handlers"]
+__all__ = ["ConversationState", "register_all_handlers"]

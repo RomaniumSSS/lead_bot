@@ -67,7 +67,7 @@ async def propose_meeting_times(lead: Lead, message: Message) -> None:
 
 
 @router.callback_query(F.data.startswith("meeting:"))
-async def handle_meeting_selection(callback: CallbackQuery) -> None:
+async def handle_meeting_selection(callback: CallbackQuery) -> None:  # noqa: PLR0911
     """
     Обрабатывает выбор времени встречи лидом.
 
@@ -75,6 +75,11 @@ async def handle_meeting_selection(callback: CallbackQuery) -> None:
     где slot: today_18, tomorrow_10, tomorrow_14, custom
     """
     if not callback.data or not callback.message:
+        return
+
+    # AICODE-NOTE: Проверка типа сообщения для корректной работы с MyPy
+    if not isinstance(callback.message, Message):
+        await callback.answer()
         return
 
     # Парсим callback data

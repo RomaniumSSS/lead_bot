@@ -71,7 +71,10 @@ async def notify_owner_about_lead(lead: Lead) -> None:
         logger.info(f"Уведомление о лиде {lead} отправлено владельцу")
 
     except Exception as e:
-        logger.error(f"Ошибка при отправке уведомления владельцу о лиде {lead}: {e}", exc_info=True)
+        logger.error(
+            f"Ошибка при отправке уведомления владельцу о лиде {lead}: {e}",
+            exc_info=True,
+        )
 
     finally:
         await bot.session.close()
@@ -131,7 +134,8 @@ async def notify_owner_meeting_scheduled(lead: Lead, meeting: Meeting) -> None:
 
     except Exception as e:
         logger.error(
-            f"Ошибка при отправке уведомления владельцу о встрече {meeting.id}: {e}", exc_info=True
+            f"Ошибка при отправке уведомления владельцу о встрече {meeting.id}: {e}",
+            exc_info=True,
         )
 
     finally:

@@ -5,6 +5,7 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 from tortoise import Tortoise
 
 from src.config import settings
@@ -49,7 +50,10 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
     )
 
-    dp = Dispatcher()
+    # AICODE-NOTE: Для MVP используем MemoryStorage.
+    # В продакшене заменить на RedisStorage для персистентности state между рестартами.
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
 
     # Регистрация middleware
     dp.message.middleware(LoggingMiddleware())
