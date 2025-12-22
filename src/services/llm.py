@@ -15,9 +15,9 @@ from src.utils.logger import logger
 client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
-# AICODE-NOTE: Используем Claude 3.5 Sonnet - оптимальное соотношение
+# AICODE-NOTE: Используем Claude 4.5 Sonnet - оптимальное соотношение
 # скорости и качества для диалогов
-MODEL = "claude-3-5-sonnet-20241022"
+MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4.5"
 
 
 async def generate_response(lead: Lead, message: str) -> LLMResponse:
@@ -111,9 +111,20 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
 
         logger.info(f"Claude response для лида {lead.id}: {response_text[:100]}")
 
+        # AICODE-NOTE: Claude иногда оборачивает JSON в markdown (```json ... ```)
+        # Очищаем от markdown-блоков перед парсингом
+        cleaned_text = response_text.strip()
+        if cleaned_text.startswith("```json"):
+            cleaned_text = cleaned_text[7:]  # Убираем ```json
+        elif cleaned_text.startswith("```"):
+            cleaned_text = cleaned_text[3:]  # Убираем ```
+        if cleaned_text.endswith("```"):
+            cleaned_text = cleaned_text[:-3]  # Убираем закрывающие ```
+        cleaned_text = cleaned_text.strip()
+
         # Парсим JSON ответ
         try:
-            parsed: LLMResponseRaw = json.loads(response_text)
+            parsed: LLMResponseRaw = json.loads(cleaned_text)
         except json.JSONDecodeError:
             # AICODE-TODO: Иногда Claude возвращает не чистый JSON. Нужен fallback парсинг.
             logger.warning(f"Claude вернул не JSON: {response_text}")
