@@ -73,6 +73,6 @@ htmlcov/
 *.temp
 .cache/
 
-# Node.js
+# Node.js (opencommit dependencies)
 node_modules/
 package-lock.json
