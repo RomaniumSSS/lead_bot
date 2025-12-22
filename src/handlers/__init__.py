@@ -2,7 +2,7 @@
 
 from aiogram import Router
 
-from src.handlers import admin, conversation, start
+from src.handlers import admin, conversation, meetings, start
 
 
 def register_all_handlers(router: Router) -> None:
@@ -14,6 +14,7 @@ def register_all_handlers(router: Router) -> None:
     """
     router.include_router(start.router)
     router.include_router(admin.router)
+    router.include_router(meetings.router)
     # Последний, чтобы обрабатывал все остальные сообщения
     router.include_router(conversation.router)
 

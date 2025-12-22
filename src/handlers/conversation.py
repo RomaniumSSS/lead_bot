@@ -72,8 +72,10 @@ async def handle_message(message: Message) -> None:  # noqa: PLR0912, PLR0915
         # - action="send_materials" → отправить портфолио/кейсы из .env
         # - action="continue" → просто продолжить диалог
         if action == "schedule_meeting":
-            # TODO: Вызвать handler для назначения встречи (Этап 3)
-            pass
+            # Предлагаем выбрать время встречи
+            from src.handlers.meetings import propose_meeting_times
+
+            await propose_meeting_times(lead, message)
         elif action == "send_materials":
             # Отправляем материалы (портфолио, кейсы, презентацию)
             materials_text = "📂 **Наши материалы:**\n\n"
