@@ -223,7 +223,15 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
     lead.status = new_status
     await lead.save()
 
-    logger.info(f"Лид {lead.id} квалифицирован: {old_status.value} → {new_status.value}")
+    # Определяем, нужно ли уведомлять владельца
+    # Уведомляем только при ПОВЫШЕНИИ статуса (NEW→WARM, NEW→HOT, WARM→HOT)
+    status_priority = {LeadStatus.NEW: 0, LeadStatus.COLD: 1, LeadStatus.WARM: 2, LeadStatus.HOT: 3}
+    status_upgraded = status_priority.get(new_status, 0) > status_priority.get(old_status, 0)
+
+    logger.info(
+        f"Лид {lead.id} квалифицирован: {old_status.value} → {new_status.value} "
+        f"(notify={status_upgraded})"
+    )
 
     # Формируем сообщение на основе статуса — коротко и по делу
     summary = f"Задача: {task}\nБюджет: {budget}\nСроки: {deadline}\n\n"
@@ -249,8 +257,8 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
     await state.set_state(ConversationState.ACTION)
     await callback.answer()
 
-    # Уведомляем владельца о новом лиде (только HOT и WARM)
-    if new_status in [LeadStatus.HOT, LeadStatus.WARM]:
+    # Уведомляем владельца только при ПОВЫШЕНИИ статуса до HOT или WARM
+    if status_upgraded and new_status in [LeadStatus.HOT, LeadStatus.WARM]:
         try:
             await notify_owner_about_lead(lead)
         except Exception as e:

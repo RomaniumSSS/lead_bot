@@ -51,8 +51,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         lead.first_name = first_name
         lead.last_name = last_name
         lead.last_message_at = datetime.utcnow()
-        # Сбрасываем статус для повторной квалификации (если restart)
-        lead.status = LeadStatus.NEW
+        # AICODE-NOTE: НЕ сбрасываем статус — чтобы избежать дублирования уведомлений.
+        # Сбрасываем только данные квалификации для нового прохода flow.
         lead.task = None
         lead.budget = None
         lead.deadline = None
