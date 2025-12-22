@@ -6,8 +6,8 @@ RUN pip install --no-cache-dir uv
 # Рабочая директория
 WORKDIR /app
 
-# Копирование файлов зависимостей
-COPY pyproject.toml ./
+# Копирование файлов зависимостей и README (нужен для hatchling)
+COPY pyproject.toml README.md ./
 
 # Установка зависимостей
 RUN uv sync --no-dev
