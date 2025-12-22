@@ -6,9 +6,10 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 from src.config import settings
-from src.database.models import Conversation, Lead, MessageRole
+from src.database.models import Conversation, Lead, LeadStatus, MessageRole
 from src.services.llm import generate_response
 from src.services.notifier import notify_owner_about_lead
+from src.services.qualifier import extract_lead_info
 from src.types import LLMResponse
 from src.utils.logger import logger
 
@@ -16,10 +17,13 @@ router = Router(name="conversation")
 
 
 @router.message(F.text)
-async def handle_message(message: Message) -> None:
+async def handle_message(message: Message) -> None:  # noqa: PLR0912, PLR0915
     """
     Обработка всех текстовых сообщений от лидов.
     Основной диалог с квалификацией.
+
+    AICODE-TODO: Рефакторинг после MVP - вынести обработку action в отдельные функции
+    для упрощения этой функции (сейчас >50 строк и >12 веток).
     """
     if not message.from_user or not message.text:
         return
@@ -110,6 +114,14 @@ async def handle_message(message: Message) -> None:
             lead.status = new_status
             await lead.save()
             logger.info(f"Статус лида {lead} изменён: {old_status.value} → {new_status.value}")
+
+            # Извлекаем данные из диалога (task, budget, deadline) для горячих и тёплых лидов
+            if new_status in [LeadStatus.HOT, LeadStatus.WARM]:
+                try:
+                    await extract_lead_info(lead)
+                except Exception as e:
+                    # AICODE-NOTE: Не критичная ошибка, просто логируем
+                    logger.error(f"Ошибка при извлечении данных для лида {lead.id}: {e}")
 
             # Уведомляем владельца о новом горячем/тёплом лиде
             await notify_owner_about_lead(lead)
