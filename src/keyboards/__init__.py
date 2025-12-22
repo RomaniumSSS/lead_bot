@@ -59,46 +59,54 @@ def get_action_keyboard(status: LeadStatus) -> InlineKeyboardMarkup:
     """
     buttons: list[list[InlineKeyboardButton]] = []
 
-    # Горячим и тёплым лидам предлагаем встречу
-    if status in [LeadStatus.HOT, LeadStatus.WARM]:
+    # Только горячим лидам активно предлагаем встречу
+    if status == LeadStatus.HOT:
         buttons.append(
-            [
-                InlineKeyboardButton(
-                    text="📅 Назначить встречу", callback_data="action:schedule_meeting"
-                )
-            ]
+            [InlineKeyboardButton(text="Назначить звонок", callback_data="action:schedule_meeting")]
         )
 
     # Всем предлагаем материалы
     buttons.append(
-        [InlineKeyboardButton(text="📂 Получить материалы", callback_data="action:send_materials")]
+        [InlineKeyboardButton(text="Получить материалы", callback_data="action:send_materials")]
     )
 
     # Кнопка для перехода в свободный диалог
-    buttons.append(
-        [InlineKeyboardButton(text="💬 Задать вопрос", callback_data="action:free_chat")]
-    )
+    buttons.append([InlineKeyboardButton(text="Задать вопрос", callback_data="action:free_chat")])
+
+    # Тёплым лидам показываем встречу, но ниже — не навязываем
+    if status == LeadStatus.WARM:
+        buttons.append(
+            [InlineKeyboardButton(text="Обсудить лично", callback_data="action:schedule_meeting")]
+        )
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_free_chat_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для свободного диалога (этап FREE_CHAT)."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def get_free_chat_keyboard(show_meeting: bool = True) -> InlineKeyboardMarkup:
+    """Клавиатура для свободного диалога (этап FREE_CHAT).
+
+    Args:
+        show_meeting: Показывать ли кнопку встречи (False для холодных лидов).
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    if show_meeting:
+        buttons.append(
+            [InlineKeyboardButton(text="Назначить звонок", callback_data="action:schedule_meeting")]
+        )
+
+    buttons.extend(
+        [
             [
                 InlineKeyboardButton(
-                    text="📅 Назначить встречу", callback_data="action:schedule_meeting"
+                    text="Получить материалы", callback_data="action:send_materials"
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    text="📂 Получить материалы", callback_data="action:send_materials"
-                )
-            ],
-            [InlineKeyboardButton(text="🔄 Начать заново", callback_data="action:restart")],
+            [InlineKeyboardButton(text="Начать заново", callback_data="action:restart")],
         ]
     )
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # Маппинг task callback → читаемое название задачи
@@ -125,7 +133,7 @@ DEADLINE_LABELS: dict[str, str] = {
 
 
 def get_progress_indicator(current_state: str) -> str:
-    """Возвращает визуальный индикатор прогресса.
+    """Возвращает минималистичный индикатор прогресса.
 
     Args:
         current_state: Текущий state (например, "ConversationState:BUDGET").
@@ -138,26 +146,17 @@ def get_progress_indicator(current_state: str) -> str:
 
     states = ["TASK", "BUDGET", "DEADLINE", "ACTION"]
     labels = {
-        "TASK": "📋 Задача",
-        "BUDGET": "💰 Бюджет",
-        "DEADLINE": "⏰ Срок",
-        "ACTION": "✅ Действие",
+        "TASK": "Задача",
+        "BUDGET": "Бюджет",
+        "DEADLINE": "Сроки",
+        "ACTION": "Итог",
     }
 
-    progress_parts: list[str] = []
+    current_idx = states.index(state_name) if state_name in states else 0
+    current_step = current_idx + 1
+    total_steps = len(states)
 
-    for idx, state in enumerate(states):
-        label = labels[state]
-        current_idx = states.index(state_name) if state_name in states else -1
-
-        if state == state_name:
-            progress_parts.append(f"**{label}** ◀")  # Текущий этап
-        elif idx < current_idx:
-            progress_parts.append(f"✅ {label}")  # Пройденный этап
-        else:
-            progress_parts.append(f"⚪ {label}")  # Будущий этап
-
-    return " → ".join(progress_parts)
+    return f"Шаг {current_step} из {total_steps}: {labels.get(state_name, 'Задача')}"
 
 
 __all__ = [

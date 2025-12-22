@@ -29,6 +29,34 @@ router = Router(name="conversation")
 
 
 # =============================================================================
+# ЗАЩИТА КНОПОК ОТ ПОВТОРНОГО НАЖАТИЯ
+# =============================================================================
+
+
+async def _check_state_and_answer(
+    callback: CallbackQuery, state: FSMContext, expected_state: str
+) -> bool:
+    """Проверяет текущий state и отвечает на callback если state неверный.
+
+    Args:
+        callback: Объект callback query
+        state: FSM context
+        expected_state: Ожидаемый state (например, "TASK")
+
+    Returns:
+        True если state корректный, False если кнопка уже не актуальна.
+    """
+    current_state = await state.get_state()
+
+    # Если state не установлен или не соответствует ожидаемому — кнопка устарела
+    if not current_state or expected_state not in current_state:
+        await callback.answer("Эта кнопка уже не актуальна", show_alert=False)
+        return False
+
+    return True
+
+
+# =============================================================================
 # CALLBACK HANDLERS для кнопок
 # =============================================================================
 
@@ -39,22 +67,23 @@ async def handle_task_callback(callback: CallbackQuery, state: FSMContext) -> No
     if not callback.data or not callback.message or not callback.from_user:
         return
 
-    # AICODE-NOTE: Проверка типа сообщения для корректной работы с MyPy
     if not isinstance(callback.message, Message):
         await callback.answer()
         return
 
+    # Защита от повторного нажатия
+    if not await _check_state_and_answer(callback, state, "TASK"):
+        return
+
     task_type = callback.data.split(":")[1]
+
+    # Сразу убираем клавиатуру чтобы предотвратить повторные нажатия
+    await callback.message.edit_reply_markup(reply_markup=None)
 
     # Если выбрана "Своя задача" — просим ввести текстом
     if task_type == "custom":
-        await callback.message.edit_reply_markup(reply_markup=None)
-
         progress = get_progress_indicator("TASK")
-        await callback.message.answer(
-            f"─────────────────\n{progress}\n─────────────────\n\n"
-            "Напишите, пожалуйста, какая задача у вас есть:"
-        )
+        await callback.message.answer(f"{progress}\n\nОпишите вашу задачу:")
         await state.set_state(ConversationState.TASK_CUSTOM_INPUT)
         await callback.answer()
         return
@@ -72,22 +101,16 @@ async def handle_task_callback(callback: CallbackQuery, state: FSMContext) -> No
         lead.last_message_at = datetime.utcnow()
         await lead.save()
 
-        # Сохраняем в историю диалога
         await Conversation.create(
             lead=lead,
             role=MessageRole.USER,
             content=f"[Выбрана задача: {task}]",
         )
 
-    # Убираем старую клавиатуру
-    await callback.message.edit_reply_markup(reply_markup=None)
-
     # Отправляем подтверждение и следующий вопрос
     progress = get_progress_indicator("BUDGET")
     await callback.message.answer(
-        f"✅ **Задача:** {task}\n\n"
-        f"─────────────────\n{progress}\n─────────────────\n\n"
-        f"Какой у вас примерный бюджет на проект?",
+        f"Задача: {task}\n\n{progress}\n\nКакой примерный бюджет?",
         reply_markup=get_budget_keyboard(),
     )
 
@@ -107,6 +130,13 @@ async def handle_budget_callback(callback: CallbackQuery, state: FSMContext) -> 
         await callback.answer()
         return
 
+    # Защита от повторного нажатия
+    if not await _check_state_and_answer(callback, state, "BUDGET"):
+        return
+
+    # Сразу убираем клавиатуру
+    await callback.message.edit_reply_markup(reply_markup=None)
+
     budget_type = callback.data.split(":")[1]
     budget = BUDGET_LABELS.get(budget_type, "Не указан")
 
@@ -120,27 +150,20 @@ async def handle_budget_callback(callback: CallbackQuery, state: FSMContext) -> 
         lead.last_message_at = datetime.utcnow()
         await lead.save()
 
-        # Сохраняем в историю диалога
         await Conversation.create(
             lead=lead,
             role=MessageRole.USER,
             content=f"[Выбран бюджет: {budget}]",
         )
 
-    # Убираем старую клавиатуру
-    await callback.message.edit_reply_markup(reply_markup=None)
-
-    # Получаем данные для показа прогресса
+    # Получаем данные для показа
     fsm_data = await state.get_data()
     task = fsm_data.get("task", "—")
 
     # Отправляем подтверждение и следующий вопрос
     progress = get_progress_indicator("DEADLINE")
     await callback.message.answer(
-        f"✅ **Задача:** {task}\n"
-        f"✅ **Бюджет:** {budget}\n\n"
-        f"─────────────────\n{progress}\n─────────────────\n\n"
-        f"Когда нужно завершить проект?",
+        f"Задача: {task}\nБюджет: {budget}\n\n{progress}\n\nКогда нужен результат?",
         reply_markup=get_deadline_keyboard(),
     )
 
@@ -160,6 +183,13 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
         await callback.answer()
         return
 
+    # Защита от повторного нажатия
+    if not await _check_state_and_answer(callback, state, "DEADLINE"):
+        return
+
+    # Сразу убираем клавиатуру
+    await callback.message.edit_reply_markup(reply_markup=None)
+
     deadline_type = callback.data.split(":")[1]
     deadline = DEADLINE_LABELS.get(deadline_type, "Не указан")
 
@@ -176,7 +206,6 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
     lead.deadline = deadline
     lead.last_message_at = datetime.utcnow()
 
-    # Сохраняем в историю диалога
     await Conversation.create(
         lead=lead,
         role=MessageRole.USER,
@@ -196,32 +225,23 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
 
     logger.info(f"Лид {lead.id} квалифицирован: {old_status.value} → {new_status.value}")
 
-    # Убираем старую клавиатуру
-    await callback.message.edit_reply_markup(reply_markup=None)
-
-    # Формируем сообщение на основе статуса
-    progress = get_progress_indicator("ACTION")
-    summary = (
-        f"✅ **Задача:** {task}\n"
-        f"✅ **Бюджет:** {budget}\n"
-        f"✅ **Срок:** {deadline}\n\n"
-        f"─────────────────\n{progress}\n─────────────────\n\n"
-    )
+    # Формируем сообщение на основе статуса — коротко и по делу
+    summary = f"Задача: {task}\nБюджет: {budget}\nСроки: {deadline}\n\n"
 
     if new_status == LeadStatus.HOT:
         message_text = (
-            summary + f"🔥 **Отлично!** Проект срочный и важный.\n\n"
-            f"Давайте назначим встречу с владельцем {settings.business_name}, "
-            f"чтобы обсудить детали?"
+            summary + "Отлично, проект срочный!\n\n"
+            f"Предлагаю назначить звонок с {settings.business_name} — обсудим детали."
         )
     elif new_status == LeadStatus.WARM:
         message_text = (
-            summary + "👍 **Понял!** Отправлю вам наши кейсы и материалы.\n\n"
-            "Что хотите сделать дальше?"
+            summary + "Понял, спасибо за информацию.\n\n"
+            "Могу отправить примеры наших работ или ответить на вопросы."
         )
-    else:  # COLD or NEW
+    else:  # COLD
         message_text = (
-            summary + "💬 **Спасибо за интерес!** Буду на связи.\n\nЕсли появятся вопросы — пишите!"
+            summary + "Спасибо за интерес!\n\n"
+            "Могу отправить материалы для ознакомления или ответить на вопросы."
         )
 
     await callback.message.answer(message_text, reply_markup=get_action_keyboard(new_status))
@@ -229,7 +249,7 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
     await state.set_state(ConversationState.ACTION)
     await callback.answer()
 
-    # Уведомляем владельца о новом лиде
+    # Уведомляем владельца о новом лиде (только HOT и WARM)
     if new_status in [LeadStatus.HOT, LeadStatus.WARM]:
         try:
             await notify_owner_about_lead(lead)
@@ -248,44 +268,54 @@ async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> 
         return
 
     action = callback.data.split(":")[1]
-
     lead = await Lead.get_or_none(telegram_id=callback.from_user.id)
 
+    # Сразу убираем клавиатуру для всех действий
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    # Определяем, показывать ли кнопку встречи (не для холодных)
+    show_meeting = lead.status != LeadStatus.COLD if lead else True
+
     if action == "schedule_meeting":
-        # AICODE-NOTE: Локальный импорт для избежания циклических зависимостей
+        # Защита: холодным лидам не даём назначать встречу
+        if lead and lead.status == LeadStatus.COLD:
+            await callback.message.answer(
+                "Сейчас мы можем прислать материалы для ознакомления.\n"
+                "Когда будете готовы обсудить детали — напишите!",
+                reply_markup=get_free_chat_keyboard(show_meeting=False),
+            )
+            await state.set_state(ConversationState.FREE_CHAT)
+            await callback.answer()
+            return
+
         from src.handlers.meetings import propose_meeting_times
 
         if lead:
-            await callback.message.edit_reply_markup(reply_markup=None)
             await propose_meeting_times(lead, callback.message)
         await callback.answer()
 
     elif action == "send_materials":
-        await callback.message.edit_reply_markup(reply_markup=None)
         await _send_materials(callback.message, lead)
         await callback.answer()
 
         # Переход в свободный диалог
         await callback.message.answer(
-            "Если появятся вопросы — пишите! Буду рад помочь. 😊",
-            reply_markup=get_free_chat_keyboard(),
+            "Если есть вопросы — пишите, отвечу.",
+            reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
         )
         await state.set_state(ConversationState.FREE_CHAT)
 
     elif action == "free_chat":
-        await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer(
-            "Отлично! Напишите ваш вопрос, и я постараюсь помочь. 💬",
-            reply_markup=get_free_chat_keyboard(),
+            "Напишите ваш вопрос.",
+            reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
         )
         await state.set_state(ConversationState.FREE_CHAT)
         await callback.answer()
 
     elif action == "restart":
-        await callback.message.edit_reply_markup(reply_markup=None)
         await state.clear()
 
-        # AICODE-NOTE: Локальный импорт для избежания циклических зависимостей
         from src.handlers.start import cmd_start
 
         await cmd_start(callback.message, state)
@@ -363,6 +393,9 @@ async def handle_free_chat(message: Message, _state: FSMContext) -> None:
 
     logger.info(f"Сообщение в FREE_CHAT от лида {lead}: {user_message[:50]}")
 
+    # Определяем, показывать ли кнопку встречи
+    show_meeting = lead.status != LeadStatus.COLD
+
     # Генерируем ответ через LLM
     try:
         response_data: LLMResponse = await generate_response_free_chat(lead, user_message)
@@ -375,13 +408,15 @@ async def handle_free_chat(message: Message, _state: FSMContext) -> None:
             content=bot_response,
         )
 
-        await message.answer(bot_response, reply_markup=get_free_chat_keyboard())
+        await message.answer(
+            bot_response, reply_markup=get_free_chat_keyboard(show_meeting=show_meeting)
+        )
 
     except Exception as e:
         logger.error(f"Ошибка LLM для лида {lead.id}: {e}", exc_info=True)
         await message.answer(
             "Извините, произошла ошибка. Попробуйте переформулировать вопрос.",
-            reply_markup=get_free_chat_keyboard(),
+            reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
         )
 
 

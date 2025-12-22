@@ -51,9 +51,11 @@ class Lead(Model):
 
     # Квалификация
     status = fields.CharEnumField(LeadStatus, default=LeadStatus.NEW, description="Статус лида")
-    task = fields.TextField(null=True, description="Какая задача у лида")
-    budget = fields.CharField(max_length=255, null=True, description="Бюджет")
-    deadline = fields.CharField(max_length=255, null=True, description="Когда нужно решить")
+    task: str | None = fields.TextField(null=True, description="Какая задача у лида")  # type: ignore[assignment]
+    budget: str | None = fields.CharField(max_length=255, null=True, description="Бюджет")  # type: ignore[assignment]
+    deadline: str | None = fields.CharField(
+        max_length=255, null=True, description="Когда нужно решить"
+    )  # type: ignore[assignment]
 
     # Метаданные
     created_at = fields.DatetimeField(auto_now_add=True, description="Дата создания")

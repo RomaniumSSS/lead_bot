@@ -10,7 +10,7 @@ from aiogram.types import Message
 from src.config import settings
 from src.database.models import Lead, LeadStatus
 from src.handlers.states import ConversationState
-from src.keyboards import get_progress_indicator, get_task_keyboard
+from src.keyboards import get_task_keyboard
 from src.utils.logger import logger
 
 router = Router(name="start")
@@ -60,21 +60,15 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     logger.info(f"{'Новый' if created else 'Существующий'} лид: {lead}")
 
-    # Получаем индикатор прогресса
-    progress = get_progress_indicator("TASK")
-
-    # Приветственное сообщение с кнопками
+    # Приветственное сообщение — коротко и по делу
     greeting = (
-        f"Привет, {first_name or 'друг'}! 👋\n\n"
-        f"Я AI-ассистент **{settings.business_name}**.\n\n"
+        f"Привет{', ' + first_name if first_name else ''}!\n\n"
+        f"Это {settings.business_name}.\n"
         f"{settings.business_description}\n\n"
-        f"─────────────────\n"
-        f"{progress}\n"
-        f"─────────────────\n\n"
-        f"Расскажите, какая задача у вас есть?"
+        f"Какая задача у вас есть?"
     )
 
-    await message.answer(greeting, reply_markup=get_task_keyboard())
+    await message.answer(greeting, reply_markup=get_task_keyboard(), parse_mode=None)
 
     # Устанавливаем state для ожидания выбора задачи
     await state.set_state(ConversationState.TASK)
