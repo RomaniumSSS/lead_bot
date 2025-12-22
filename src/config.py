@@ -33,10 +33,10 @@ class Settings(BaseSettings):
     mode: str = "development"
     log_level: str = "INFO"
 
-    # AICODE-TODO: Добавить для MVP (action="send_materials")
-    # portfolio_url: str | None = None  # Ссылка на портфолио  # noqa: ERA001
-    # cases_url: str | None = None      # Ссылка на кейсы  # noqa: ERA001
-    # presentation_url: str | None = None  # Ссылка на презентацию  # noqa: ERA001
+    # Materials for warm leads (action="send_materials")
+    portfolio_url: str | None = None
+    cases_url: str | None = None
+    presentation_url: str | None = None
 
 
 # Глобальный экземпляр настроек

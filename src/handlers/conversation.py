@@ -5,6 +5,7 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.types import Message
 
+from src.config import settings
 from src.database.models import Conversation, Lead, MessageRole
 from src.services.llm import generate_response
 from src.services.notifier import notify_owner_about_lead
@@ -62,16 +63,37 @@ async def handle_message(message: Message) -> None:
         new_status = response_data["status"]
         action = response_data["action"]
 
-        # AICODE-TODO: Реализовать обработку action для MVP
+        # AICODE-NOTE: Обработка действий на основе квалификации лида
         # - action="schedule_meeting" → запросить время встречи у лида (inline keyboard)
-        # - action="send_materials" → отправить портфолио/кейсы (настроить ссылки в .env)
-        # - action="continue" → просто продолжить диалог (уже работает)
+        # - action="send_materials" → отправить портфолио/кейсы из .env
+        # - action="continue" → просто продолжить диалог
         if action == "schedule_meeting":
-            # TODO: Вызвать handler для назначения встречи
+            # TODO: Вызвать handler для назначения встречи (Этап 3)
             pass
         elif action == "send_materials":
-            # TODO: Отправить материалы (ссылки из config)
-            pass
+            # Отправляем материалы (портфолио, кейсы, презентацию)
+            materials_text = "📂 **Наши материалы:**\n\n"
+            materials_added = False
+
+            if settings.portfolio_url:
+                materials_text += f"🌐 **Портфолио:** {settings.portfolio_url}\n"
+                materials_added = True
+
+            if settings.cases_url:
+                materials_text += f"📋 **Кейсы:** {settings.cases_url}\n"
+                materials_added = True
+
+            if settings.presentation_url:
+                materials_text += f"📊 **Презентация:** {settings.presentation_url}\n"
+                materials_added = True
+
+            if materials_added:
+                materials_text += "\nЕсли возникнут вопросы — пишите, буду рад помочь! 😊"
+                await message.answer(materials_text, parse_mode="Markdown")
+                logger.info(f"Отправлены материалы лиду {lead.id}")
+            else:
+                # AICODE-NOTE: Если материалы не настроены в .env, просто пропускаем
+                logger.warning(f"Материалы не настроены (пустые URL в .env) для лида {lead.id}")
 
         # Для action == "continue" просто продолжаем — отправляем ответ ниже
 
