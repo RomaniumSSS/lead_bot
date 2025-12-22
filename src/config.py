@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     mode: str = "development"
     log_level: str = "INFO"
 
+    # AICODE-TODO: Добавить для MVP (action="send_materials")
+    # portfolio_url: str | None = None  # Ссылка на портфолио  # noqa: ERA001
+    # cases_url: str | None = None      # Ссылка на кейсы  # noqa: ERA001
+    # presentation_url: str | None = None  # Ссылка на презентацию  # noqa: ERA001
+
 
 # Глобальный экземпляр настроек
 # AICODE-NOTE: Settings автоматически загружает переменные из .env

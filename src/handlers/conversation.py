@@ -60,9 +60,20 @@ async def handle_message(message: Message) -> None:
 
         bot_response: str = response_data["response"]
         new_status = response_data["status"]
-        # TODO: Использовать action для разных типов ответов
-        # (назначение встреч, отправка материалов)
-        _action: str = response_data["action"]
+        action = response_data["action"]
+
+        # AICODE-TODO: Реализовать обработку action для MVP
+        # - action="schedule_meeting" → запросить время встречи у лида (inline keyboard)
+        # - action="send_materials" → отправить портфолио/кейсы (настроить ссылки в .env)
+        # - action="continue" → просто продолжить диалог (уже работает)
+        if action == "schedule_meeting":
+            # TODO: Вызвать handler для назначения встречи
+            pass
+        elif action == "send_materials":
+            # TODO: Отправить материалы (ссылки из config)
+            pass
+
+        # Для action == "continue" просто продолжаем — отправляем ответ ниже
 
         # Сохраняем ответ бота в историю
         await Conversation.create(

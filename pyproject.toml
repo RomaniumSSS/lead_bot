@@ -35,7 +35,7 @@ packages = ["src"]
 [tool.aerich]
 tortoise_orm = "src.database.config.TORTOISE_ORM"
 location = "./migrations"
-src_folder = "./src"
+src_folder = "./."
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

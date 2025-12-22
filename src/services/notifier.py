@@ -75,12 +75,18 @@ async def notify_owner_about_lead(lead: Lead) -> None:
         await bot.session.close()
 
 
-async def notify_owner_meeting_scheduled(lead: Lead, meeting: Meeting) -> None:
+async def notify_owner_meeting_scheduled(lead: Lead, _meeting: Meeting) -> None:
     """
     Отправляет уведомление владельцу о назначенной встрече.
 
     Args:
         lead: Объект лида из БД
-        meeting: Объект встречи из БД
+        _meeting: Объект встречи из БД (префикс _ т.к. пока не используется)
     """
-    # AICODE-TODO: Реализовать после добавления функционала назначения встреч в handler
+    # AICODE-TODO: Реализовать для MVP после добавления функционала назначения встреч
+    # Формат уведомления:
+    # 📅 **Новая встреча назначена!**
+    # 👤 Имя: {lead_name}
+    # ⏰ Время: {_meeting.scheduled_at}
+    # Telegram: @{username}
+    logger.warning(f"notify_owner_meeting_scheduled для {lead.id} — НЕ РЕАЛИЗОВАНО (TODO)")
