@@ -43,27 +43,29 @@ async def notify_owner_about_lead(lead: Lead) -> None:
         # Имя лида
         lead_name: str = lead.first_name or lead.username or f"User {lead.telegram_id}"
 
-        # Формируем текст уведомления
-        notification: str = f"{emoji} **Новый {status_text} лид!**\n\n👤 **Имя**: {lead_name}\n"
+        # Формируем текст уведомления (используем HTML для надежности)
+        notification: str = (
+            f"{emoji} <b>Новый {status_text} лид!</b>\n\n👤 <b>Имя</b>: {lead_name}\n"
+        )
 
         if lead.task:
-            notification += f"📋 **Задача**: {lead.task}\n"
+            notification += f"📋 <b>Задача</b>: {lead.task}\n"
 
         if lead.budget:
-            notification += f"💰 **Бюджет**: {lead.budget}\n"
+            notification += f"💰 <b>Бюджет</b>: {lead.budget}\n"
 
         if lead.deadline:
-            notification += f"⏰ **Срок**: {lead.deadline}\n"
+            notification += f"⏰ <b>Срок</b>: {lead.deadline}\n"
 
         # Ссылка на пользователя
         if lead.username:
-            notification += f"\n**Telegram**: @{lead.username}"
+            notification += f"\n<b>Telegram</b>: @{lead.username}"
         else:
-            notification += f"\n**Telegram ID**: `{lead.telegram_id}`"
+            notification += f"\n<b>Telegram ID</b>: <code>{lead.telegram_id}</code>"
 
         # Отправляем уведомление владельцу
         await bot.send_message(
-            chat_id=settings.owner_telegram_id, text=notification, parse_mode="Markdown"
+            chat_id=settings.owner_telegram_id, text=notification, parse_mode="HTML"
         )
 
         logger.info(f"Уведомление о лиде {lead} отправлено владельцу")
@@ -97,32 +99,32 @@ async def notify_owner_meeting_scheduled(lead: Lead, meeting: Meeting) -> None:
         # Форматируем время встречи
         time_str = meeting.scheduled_at.strftime("%d.%m.%Y в %H:%M")
 
-        # Формируем текст уведомления
+        # Формируем текст уведомления (используем HTML для надежности)
         notification = (
-            f"📅 **Новая встреча назначена!**\n\n"
-            f"👤 **Имя**: {lead_name}\n"
-            f"⏰ **Время**: {time_str}\n"
+            f"📅 <b>Новая встреча назначена!</b>\n\n"
+            f"👤 <b>Имя</b>: {lead_name}\n"
+            f"⏰ <b>Время</b>: {time_str}\n"
         )
 
         # Добавляем информацию о задаче, бюджете, сроке (если есть)
         if lead.task:
-            notification += f"📋 **Задача**: {lead.task}\n"
+            notification += f"📋 <b>Задача</b>: {lead.task}\n"
 
         if lead.budget:
-            notification += f"💰 **Бюджет**: {lead.budget}\n"
+            notification += f"💰 <b>Бюджет</b>: {lead.budget}\n"
 
         if lead.deadline:
-            notification += f"⏳ **Срок**: {lead.deadline}\n"
+            notification += f"⏳ <b>Срок</b>: {lead.deadline}\n"
 
         # Ссылка на пользователя
         if lead.username:
-            notification += f"\n**Telegram**: @{lead.username}"
+            notification += f"\n<b>Telegram</b>: @{lead.username}"
         else:
-            notification += f"\n**Telegram ID**: `{lead.telegram_id}`"
+            notification += f"\n<b>Telegram ID</b>: <code>{lead.telegram_id}</code>"
 
         # Отправляем уведомление владельцу
         await bot.send_message(
-            chat_id=settings.owner_telegram_id, text=notification, parse_mode="Markdown"
+            chat_id=settings.owner_telegram_id, text=notification, parse_mode="HTML"
         )
 
         logger.info(f"Уведомление о встрече {meeting.id} для лида {lead.id} отправлено владельцу")
