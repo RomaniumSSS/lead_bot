@@ -1,0 +1,46 @@
+# Cursor IDE - игнорируемые файлы для индексации и контекста
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# Dependencies lock (большой файл)
+uv.lock
+
+# Git
+.git/
+
+# IDE
+.idea/
+.vscode/
+
+# Pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+*.swp
+*.swo
