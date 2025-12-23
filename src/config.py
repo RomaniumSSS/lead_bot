@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     mode: str = "development"
     log_level: str = "INFO"
 
+    # Bot Mode
+    bot_mode: str = "polling"  # polling | webhook
+
+    # Webhook настройки (только для bot_mode=webhook)
+    webhook_url: str | None = None  # https://yourdomain.com/webhook
+    webhook_path: str = "/webhook"
+    webhook_port: int = 8080
+
     # Materials for warm leads (action="send_materials")
     portfolio_url: str | None = None
     cases_url: str | None = None

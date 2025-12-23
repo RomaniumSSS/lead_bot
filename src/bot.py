@@ -14,6 +14,7 @@ from src.handlers import register_all_handlers
 from src.middlewares.logging import LoggingMiddleware
 from src.services.scheduler import run_scheduler
 from src.utils.logger import logger
+from src.webhook import remove_webhook, setup_webhook
 
 
 async def on_startup() -> None:
@@ -62,18 +63,43 @@ async def main() -> None:
     # Регистрация handlers
     register_all_handlers(dp)
 
+    # Запуск scheduler в фоне
+    scheduler_task: asyncio.Task[None] | None = None
+    webhook_runner = None
+
     try:
         # Startup
         await on_startup()
 
         # Запуск scheduler в фоне
-        # AICODE-NOTE: Сохраняем ссылку на task, чтобы избежать garbage collection
-        _scheduler_task = asyncio.create_task(run_scheduler(bot))  # noqa: RUF006
+        scheduler_task = asyncio.create_task(run_scheduler(bot))
         logger.info("✅ Планировщик follow-up запущен в фоне")
 
-        # Запуск polling
-        logger.info("✅ Бот запущен! Ожидание сообщений...")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # Определяем режим работы бота
+        if settings.bot_mode == "webhook":
+            # Webhook режим
+            if not settings.webhook_url:
+                raise ValueError("WEBHOOK_URL не установлен в .env для режима webhook")
+
+            logger.info("🔗 Режим работы: WEBHOOK")
+            webhook_runner = await setup_webhook(
+                bot=bot,
+                dp=dp,
+                webhook_url=settings.webhook_url,
+                webhook_path=settings.webhook_path,
+                port=settings.webhook_port,
+            )
+            logger.info("✅ Бот запущен в режиме webhook! Ожидание обновлений...")
+
+            # В webhook режиме бот просто ждёт (сервер уже запущен)
+            # Ждём бесконечно, пока не будет прервано
+            await asyncio.Event().wait()
+
+        else:
+            # Polling режим (по умолчанию)
+            logger.info("🔄 Режим работы: POLLING")
+            logger.info("✅ Бот запущен! Ожидание сообщений...")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
     except KeyboardInterrupt:
         logger.info("⏸️  Прервано пользователем (Ctrl+C)")
@@ -82,6 +108,22 @@ async def main() -> None:
         logger.error(f"❌ Критическая ошибка: {e}", exc_info=True)
 
     finally:
+        # Graceful shutdown scheduler
+        if scheduler_task and not scheduler_task.done():
+            logger.info("⏹️  Останавливаем планировщик...")
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except asyncio.CancelledError:
+                logger.info("✅ Планировщик остановлен")
+
+        # Graceful shutdown webhook
+        if webhook_runner:
+            logger.info("⏹️  Останавливаем webhook сервер...")
+            await remove_webhook(bot)
+            await webhook_runner.cleanup()
+            logger.info("✅ Webhook сервер остановлен")
+
         # Shutdown
         await on_shutdown()
         await bot.session.close()

@@ -130,7 +130,54 @@ class Meeting(Model):
         return f"Meeting({self.scheduled_at}, {self.status.value})"
 
 
+class LLMUsage(Model):
+    """Трекинг использования LLM API."""
+
+    id = fields.IntField(primary_key=True)
+
+    # Связь с лидом (optional)
+    lead: fields.ForeignKeyRelation[Lead] | None = fields.ForeignKeyField(
+        "models.Lead",
+        related_name="llm_usage",
+        null=True,
+        on_delete=fields.SET_NULL,
+        description="Связанный лид (если есть)",
+    )
+
+    # Модель и тип запроса
+    model = fields.CharField(max_length=100, description="Модель Claude")
+    request_type = fields.CharField(
+        max_length=50, description="Тип запроса (greeting, free_chat, etc.)"
+    )
+
+    # Токены
+    input_tokens = fields.IntField(description="Input tokens")
+    output_tokens = fields.IntField(description="Output tokens")
+    cache_creation_tokens = fields.IntField(default=0, description="Cache creation tokens")
+    cache_read_tokens = fields.IntField(default=0, description="Cache read tokens")
+
+    # Стоимость (в USD cents для точности, напр. 125 = $1.25)
+    cost_input = fields.IntField(description="Стоимость input токенов в центах")
+    cost_output = fields.IntField(description="Стоимость output токенов в центах")
+    cost_cache_creation = fields.IntField(
+        default=0, description="Стоимость cache creation в центах"
+    )
+    cost_cache_read = fields.IntField(default=0, description="Стоимость cache read в центах")
+    total_cost = fields.IntField(description="Общая стоимость в центах")
+
+    # Метаданные
+    created_at = fields.DatetimeField(auto_now_add=True, description="Дата создания")
+
+    class Meta:
+        table = "llm_usage"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"LLMUsage({self.model}, {self.request_type}, ${self.total_cost/100:.2f})"
+
+
 # Pydantic модели для сериализации (опционально, для будущих API)
 LeadPydantic = pydantic_model_creator(Lead, name="Lead")
 ConversationPydantic = pydantic_model_creator(Conversation, name="Conversation")
 MeetingPydantic = pydantic_model_creator(Meeting, name="Meeting")
+LLMUsagePydantic = pydantic_model_creator(LLMUsage, name="LLMUsage")

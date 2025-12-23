@@ -193,6 +193,220 @@ docker compose exec bot uv run aerich upgrade
 
 ---
 
+## 🔗 Шаг 9 (опционально): Настройка Webhook для продакшена
+
+Webhook — более эффективный режим работы для продакшена. Вместо того, чтобы бот опрашивал Telegram каждые несколько секунд (polling), Telegram сам отправляет обновления на ваш сервер.
+
+### Преимущества webhook:
+- ⚡ Мгновенная доставка сообщений (без задержки)
+- 💰 Меньше нагрузка на сервер
+- 🚀 Лучше масштабируется
+
+### Требования:
+- Доменное имя (например, `yourdomain.com`)
+- HTTPS (SSL сертификат)
+- Открытый порт 8080 (или другой)
+
+---
+
+### 9.1. Получение доменного имени
+
+Зарегистрируйте домен (например, на [Namecheap](https://www.namecheap.com/) или [Cloudflare](https://www.cloudflare.com/)).
+
+Укажите A-запись в DNS:
+```
+A    @    YOUR_VPS_IP
+```
+
+Проверьте:
+```bash
+ping yourdomain.com
+# Должен вернуть ваш VPS IP
+```
+
+---
+
+### 9.2. Установка Nginx
+
+```bash
+sudo apt install -y nginx
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
+
+Проверьте, что Nginx работает:
+```bash
+curl http://yourdomain.com
+# Должна вернуться дефолтная страница Nginx
+```
+
+---
+
+### 9.3. Установка SSL (Let's Encrypt)
+
+```bash
+# Установка Certbot
+sudo apt install -y certbot python3-certbot-nginx
+
+# Получение сертификата
+sudo certbot --nginx -d yourdomain.com
+
+# Certbot автоматически настроит Nginx для HTTPS
+```
+
+Проверьте:
+```bash
+curl https://yourdomain.com
+# Должна вернуться дефолтная страница Nginx через HTTPS
+```
+
+---
+
+### 9.4. Настройка Nginx для проксирования webhook
+
+Создайте конфиг Nginx:
+
+```bash
+sudo nano /etc/nginx/sites-available/ai-sales-assistant
+```
+
+Вставьте:
+
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com;
+
+    # Redirect HTTP to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name yourdomain.com;
+
+    # SSL certificates (Certbot автоматически добавит)
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    # Webhook endpoint
+    location /webhook {
+        proxy_pass http://localhost:8080/webhook;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Healthcheck endpoint (опционально)
+    location /health {
+        proxy_pass http://localhost:8080/health;
+        proxy_http_version 1.1;
+    }
+}
+```
+
+Активируйте конфиг:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/ai-sales-assistant /etc/nginx/sites-enabled/
+sudo nginx -t  # Проверка конфигурации
+sudo systemctl restart nginx
+```
+
+---
+
+### 9.5. Обновление .env для webhook
+
+```bash
+cd ai-sales-assistant
+nano .env
+```
+
+Добавьте/измените:
+
+```env
+BOT_MODE=webhook
+WEBHOOK_URL=https://yourdomain.com/webhook
+WEBHOOK_PATH=/webhook
+WEBHOOK_PORT=8080
+```
+
+Сохраните (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
+---
+
+### 9.6. Перезапуск бота
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+Проверьте логи:
+
+```bash
+docker compose logs -f bot
+```
+
+Вы должны увидеть:
+
+```
+🔗 Режим работы: WEBHOOK
+🔗 Настройка webhook: https://yourdomain.com/webhook
+✅ Webhook URL установлен в Telegram
+✅ Webhook сервер запущен на порту 8080
+✅ Бот запущен в режиме webhook! Ожидание обновлений...
+```
+
+---
+
+### 9.7. Проверка работы webhook
+
+Отправьте сообщение боту в Telegram. Если всё настроено правильно, бот ответит мгновенно.
+
+Проверить статус webhook можно через Telegram Bot API:
+
+```bash
+curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo"
+```
+
+Ответ должен содержать:
+```json
+{
+  "ok": true,
+  "result": {
+    "url": "https://yourdomain.com/webhook",
+    "has_custom_certificate": false,
+    "pending_update_count": 0,
+    "max_connections": 40
+  }
+}
+```
+
+---
+
+### 9.8. Возврат к polling режиму
+
+Если webhook не работает или нужно вернуться к polling:
+
+```bash
+# В .env
+BOT_MODE=polling
+
+# Перезапуск
+docker compose down
+docker compose up -d --build
+```
+
+Бот автоматически удалит webhook и вернётся к polling.
+
+---
+
 ## 🛡️ Безопасность (рекомендации)
 
 ### 1. Firewall (UFW)

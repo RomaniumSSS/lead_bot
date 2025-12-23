@@ -18,6 +18,7 @@ from tenacity import (
 
 from src.config import settings
 from src.database.models import Conversation, Lead, LeadStatus
+from src.services.llm_monitor import track_llm_usage
 from src.types import LLMResponse, LLMResponseRaw
 from src.utils.logger import logger
 
@@ -197,15 +198,13 @@ async def generate_response_free_chat(lead: Lead, message: str) -> LLMResponse:
 
         response_text: str = first_block.text
 
-        # Логируем использование кэша (если есть)
-        usage = response.usage
-        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
-            logger.info(
-                f"Claude FREE_CHAT для лида {lead.id}: cache hit "
-                f"({usage.cache_read_input_tokens} cached tokens)"
-            )
-        else:
-            logger.info(f"Claude FREE_CHAT для лида {lead.id}: {response_text[:100]}")
+        # Трекинг использования LLM
+        await track_llm_usage(
+            model=MODEL,
+            usage=response.usage,
+            request_type="free_chat",
+            lead=lead,
+        )
 
         # Парсим и возвращаем JSON ответ
         return _parse_llm_response(response_text, lead.status)
@@ -319,15 +318,13 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
 
         response_text: str = first_block.text
 
-        # Логируем использование кэша (если есть)
-        usage = response.usage
-        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
-            logger.info(
-                f"Claude response для лида {lead.id}: cache hit "
-                f"({usage.cache_read_input_tokens} cached tokens)"
-            )
-        else:
-            logger.info(f"Claude response для лида {lead.id}: {response_text[:100]}")
+        # Трекинг использования LLM
+        await track_llm_usage(
+            model=MODEL,
+            usage=response.usage,
+            request_type="qualification",
+            lead=lead,
+        )
 
         # Парсим JSON ответ
         return _parse_llm_response(response_text, lead.status)
@@ -426,13 +423,13 @@ async def generate_suggested_questions(lead: Lead) -> list[str]:
 
         response_text = first_block.text.strip()
 
-        # Логируем использование кэша
-        usage = response.usage
-        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
-            logger.info(
-                f"Claude SUGGESTED_QUESTIONS для лида {lead.id}: cache hit "
-                f"({usage.cache_read_input_tokens} cached tokens)"
-            )
+        # Трекинг использования LLM
+        await track_llm_usage(
+            model=MODEL,
+            usage=response.usage,
+            request_type="suggested_questions",
+            lead=lead,
+        )
 
         # Очищаем от markdown
         if response_text.startswith("```json"):
@@ -586,13 +583,13 @@ async def generate_lead_summary(lead: Lead) -> str:
 
         response_text = first_block.text.strip()
 
-        # Логируем использование кэша
-        usage = response.usage
-        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
-            logger.info(
-                f"Claude LEAD_SUMMARY для лида {lead.id}: cache hit "
-                f"({usage.cache_read_input_tokens} cached tokens)"
-            )
+        # Трекинг использования LLM
+        await track_llm_usage(
+            model=MODEL,
+            usage=response.usage,
+            request_type="lead_summary",
+            lead=lead,
+        )
 
         # Очищаем от markdown
         if response_text.startswith("```json"):
@@ -749,8 +746,15 @@ async def generate_greeting(lead: Lead) -> str:
         parsed = json.loads(response_text)
         greeting: str = parsed.get("greeting", "")
 
+        # Трекинг использования LLM
+        await track_llm_usage(
+            model=MODEL_HAIKU,
+            usage=response.usage,
+            request_type="greeting",
+            lead=lead,
+        )
+
         if greeting:
-            logger.info(f"Claude Haiku GREETING для лида {lead.id}: {greeting}")
             return greeting
 
         # Пустое приветствие — используем fallback
@@ -873,8 +877,15 @@ async def generate_followup_message(lead: Lead, days_since_last: int) -> str:
         parsed = json.loads(response_text)
         message: str = parsed.get("message", "")
 
+        # Трекинг использования LLM
+        await track_llm_usage(
+            model=MODEL_HAIKU,
+            usage=response.usage,
+            request_type="followup",
+            lead=lead,
+        )
+
         if message:
-            logger.info(f"Claude Haiku FOLLOWUP для лида {lead.id}: {message}")
             return message
 
         # Пустое сообщение — используем fallback
@@ -992,6 +1003,14 @@ async def parse_custom_meeting_time(text: str) -> dict[str, str] | None:
         response_text = response_text.strip()
 
         parsed = json.loads(response_text)
+
+        # Трекинг использования LLM (без привязки к лиду)
+        await track_llm_usage(
+            model=MODEL,
+            usage=response.usage,
+            request_type="parse_meeting_time",
+            lead=None,
+        )
 
         if not parsed.get("success"):
             logger.warning(f"Claude не смог распарсить время: {parsed.get('reason')}")

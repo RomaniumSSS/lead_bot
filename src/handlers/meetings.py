@@ -4,7 +4,12 @@ from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from src.database.models import Lead, Meeting, MeetingStatus
 from src.handlers.states import ConversationState
@@ -138,7 +143,9 @@ def _generate_meeting_slots() -> list[datetime]:
 
 
 @router.callback_query(F.data.startswith("meeting:"))
-async def handle_meeting_selection(callback: CallbackQuery, state: FSMContext) -> None:  # noqa: PLR0911, PLR0912, PLR0915
+async def handle_meeting_selection(  # noqa: PLR0911, PLR0912, PLR0915
+    callback: CallbackQuery, state: FSMContext
+) -> None:
     """
     Обрабатывает выбор времени встречи лидом.
 

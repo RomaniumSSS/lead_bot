@@ -33,9 +33,15 @@ async def send_follow_up(bot: Bot, lead: Lead) -> None:
 
     try:
         await bot.send_message(chat_id=lead.telegram_id, text=message)
-        logger.info(f"Отправлен follow-up лиду {lead.id} (попытка {lead.follow_up_count + 1})")
+        logger.info(
+            f"✅ Follow-up отправлен лиду {lead.id} (#{lead.follow_up_count + 1}, "
+            f"telegram_id={lead.telegram_id}, статус={lead.status.value})"
+        )
     except Exception as e:
-        logger.error(f"Ошибка отправки follow-up лиду {lead.id}: {e}")
+        logger.error(
+            f"❌ Ошибка отправки follow-up лиду {lead.id} (telegram_id={lead.telegram_id}): {e}",
+            exc_info=True,
+        )
 
 
 async def check_follow_ups(bot: Bot) -> None:
@@ -87,11 +93,15 @@ async def check_follow_ups(bot: Bot) -> None:
         await lead.save()
         logger.info(f"Лид {lead.id} переведён в COLD после 2-х follow-up без ответа")
 
+    total_checked = (
+        len(leads_for_first_followup) + len(leads_for_second_followup) + len(leads_to_cold)
+    )
     logger.info(
-        f"Follow-up проверка завершена: "
-        f"{len(leads_for_first_followup)} первых, "
-        f"{len(leads_for_second_followup)} вторых, "
-        f"{len(leads_to_cold)} переведено в COLD"
+        f"📊 Follow-up проверка завершена: "
+        f"проверено лидов={total_checked}, "
+        f"1-й follow-up={len(leads_for_first_followup)}, "
+        f"2-й follow-up={len(leads_for_second_followup)}, "
+        f"переведено в COLD={len(leads_to_cold)}"
     )
 
 
@@ -104,13 +114,18 @@ async def run_scheduler(bot: Bot) -> None:
     Args:
         bot: Aiogram Bot instance
     """
-    logger.info("Планировщик follow-up запущен")
+    logger.info("⏰ Планировщик follow-up запущен (интервал: 1 час)")
 
-    while True:
-        try:
-            await check_follow_ups(bot)
-        except Exception as e:
-            logger.error(f"Ошибка в планировщике follow-up: {e}", exc_info=True)
+    try:
+        while True:
+            try:
+                logger.info("🔍 Запуск проверки follow-up...")
+                await check_follow_ups(bot)
+            except Exception as e:
+                logger.error(f"❌ Ошибка в планировщике follow-up: {e}", exc_info=True)
 
-        # Ждём 1 час до следующей проверки
-        await asyncio.sleep(3600)  # 3600 секунд = 1 час
+            # Ждём 1 час до следующей проверки
+            logger.info("⏸️  Планировщик ждёт 1 час до следующей проверки...")
+            await asyncio.sleep(3600)  # 3600 секунд = 1 час
+    except asyncio.CancelledError:
+        logger.info("⏹️  Планировщик остановлен gracefully (CancelledError)")
