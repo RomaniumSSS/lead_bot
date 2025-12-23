@@ -18,9 +18,10 @@ from src.keyboards import (
     get_deadline_keyboard,
     get_free_chat_keyboard,
     get_progress_indicator,
+    get_suggested_questions_keyboard,
     get_task_keyboard,
 )
-from src.services.llm import generate_response_free_chat
+from src.services.llm import generate_response_free_chat, generate_suggested_questions
 from src.services.notifier import notify_owner_about_lead
 from src.types import LLMResponse
 from src.utils.logger import logger
@@ -280,6 +281,93 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
             logger.error(f"Ошибка уведомления владельца о лиде {lead.id}: {e}")
 
 
+@router.callback_query(F.data.startswith("question:"))
+async def handle_question_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Обработка выбора предложенного вопроса."""
+    if not callback.data or not callback.message or not callback.from_user:
+        return
+
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+
+    # Сразу убираем клавиатуру
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    question_action = callback.data.split(":")[1]
+
+    # Если выбран "Свой вопрос" — ждём текстового ввода
+    if question_action == "custom":
+        lead = await Lead.get_or_none(telegram_id=callback.from_user.id)
+        show_meeting = lead.status != LeadStatus.COLD if lead else True
+
+        await callback.message.answer(
+            "Напишите ваш вопрос:", reply_markup=get_free_chat_keyboard(show_meeting=show_meeting)
+        )
+        await callback.answer()
+        return
+
+    # Иначе — получаем выбранный вопрос из FSM
+    fsm_data = await state.get_data()
+    suggested_questions: list[str] = fsm_data.get("suggested_questions", [])
+
+    try:
+        question_idx = int(question_action)
+        if question_idx < 0 or question_idx >= len(suggested_questions):
+            await callback.answer("Ошибка: вопрос не найден", show_alert=True)
+            return
+
+        selected_question = suggested_questions[question_idx]
+
+        # Сохраняем выбранный вопрос как сообщение от пользователя
+        lead = await Lead.get_or_none(telegram_id=callback.from_user.id)
+        if not lead:
+            await callback.answer("Ошибка: лид не найден", show_alert=True)
+            return
+
+        await _update_last_message_time(lead)
+
+        # Сохраняем вопрос в историю
+        await Conversation.create(
+            lead=lead,
+            role=MessageRole.USER,
+            content=selected_question,
+        )
+
+        # Генерируем ответ через LLM
+        show_meeting = lead.status != LeadStatus.COLD
+
+        try:
+            response_data: LLMResponse = await generate_response_free_chat(lead, selected_question)
+            bot_response = response_data["response"]
+
+            # Сохраняем ответ бота
+            await Conversation.create(
+                lead=lead,
+                role=MessageRole.ASSISTANT,
+                content=bot_response,
+            )
+
+            await callback.message.answer(
+                f"❓ {selected_question}\n\n{bot_response}",
+                reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
+            )
+
+            await callback.answer()
+            logger.info(f"Лид {lead.id} выбрал вопрос: {selected_question}")
+
+        except Exception as e:
+            logger.error(f"Ошибка LLM для лида {lead.id}: {e}", exc_info=True)
+            await callback.message.answer(
+                "Извините, произошла ошибка. Попробуйте переформулировать вопрос.",
+                reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
+            )
+            await callback.answer()
+
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка: неверный формат вопроса", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("action:"))
 async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """Обработка кнопок действий после квалификации."""
@@ -311,6 +399,7 @@ async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> 
             await callback.answer()
             return
 
+        # AICODE-NOTE: Динамический импорт для избежания циклических зависимостей
         from src.handlers.meetings import propose_meeting_times
 
         if lead:
@@ -329,16 +418,50 @@ async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> 
         await state.set_state(ConversationState.FREE_CHAT)
 
     elif action == "free_chat":
-        await callback.message.answer(
-            "Напишите ваш вопрос.",
-            reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
-        )
-        await state.set_state(ConversationState.FREE_CHAT)
-        await callback.answer()
+        # Генерируем предложенные вопросы через LLM
+        if lead:
+            try:
+                # Показываем индикатор "печатает..."
+                await callback.message.answer("Генерирую вопросы...")
+
+                # Генерируем вопросы
+                suggested_questions = await generate_suggested_questions(lead)
+
+                # Сохраняем в FSM для обработки выбора
+                await state.update_data(suggested_questions=suggested_questions)
+
+                # Показываем вопросы
+                await callback.message.answer(
+                    "Что вас интересует?",
+                    reply_markup=get_suggested_questions_keyboard(suggested_questions),
+                )
+
+                await state.set_state(ConversationState.FREE_CHAT)
+                await callback.answer()
+                logger.info(f"Предложены вопросы для лида {lead.id}: {suggested_questions}")
+
+            except Exception as e:
+                logger.error(f"Ошибка генерации вопросов для лида {lead.id}: {e}", exc_info=True)
+                # Fallback: переходим в обычный FREE_CHAT
+                await callback.message.answer(
+                    "Напишите ваш вопрос.",
+                    reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
+                )
+                await state.set_state(ConversationState.FREE_CHAT)
+                await callback.answer()
+        else:
+            # Если лид не найден — обычный FREE_CHAT
+            await callback.message.answer(
+                "Напишите ваш вопрос.",
+                reply_markup=get_free_chat_keyboard(show_meeting=show_meeting),
+            )
+            await state.set_state(ConversationState.FREE_CHAT)
+            await callback.answer()
 
     elif action == "restart":
         await state.clear()
 
+        # AICODE-NOTE: Динамический импорт для избежания циклических зависимостей
         from src.handlers.start import cmd_start
 
         await cmd_start(callback.message, state)
@@ -567,3 +690,21 @@ async def _send_materials(message: Message, lead: Lead | None) -> None:
             parse_mode="Markdown",
         )
         logger.warning("Материалы не настроены (пустые URL в .env)")
+
+
+def create_router() -> Router:
+    """Создаёт новый роутер для conversation handlers (для тестов)."""
+    new_router = Router(name="conversation")
+    # Callback handlers
+    new_router.callback_query.register(handle_task_callback, F.data.startswith("task:"))
+    new_router.callback_query.register(handle_budget_callback, F.data.startswith("budget:"))
+    new_router.callback_query.register(handle_deadline_callback, F.data.startswith("deadline:"))
+    new_router.callback_query.register(handle_question_callback, F.data.startswith("question:"))
+    new_router.callback_query.register(handle_action_callback, F.data.startswith("action:"))
+    # Message handlers
+    new_router.message.register(
+        handle_task_custom_input, ConversationState.TASK_CUSTOM_INPUT, F.text
+    )
+    new_router.message.register(handle_free_chat, ConversationState.FREE_CHAT, F.text)
+    new_router.message.register(handle_message_without_state, F.text)
+    return new_router

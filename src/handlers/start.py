@@ -11,6 +11,7 @@ from src.config import settings
 from src.database.models import Lead, LeadStatus
 from src.handlers.states import ConversationState
 from src.keyboards import get_task_keyboard
+from src.services.llm import generate_greeting
 from src.utils.logger import logger
 
 router = Router(name="start")
@@ -63,9 +64,17 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     logger.info(f"{'Новый' if created else 'Существующий'} лид: {lead}")
 
-    # Приветственное сообщение — коротко и по делу
+    # Генерируем персонализированное приветствие через LLM
+    try:
+        personalized_greeting = await generate_greeting(lead)
+    except Exception as e:
+        logger.error(f"Ошибка генерации приветствия для лида {lead.id}: {e}")
+        # Fallback на простое приветствие
+        personalized_greeting = f"Привет{', ' + first_name if first_name else ''}! 👋"
+
+    # Приветственное сообщение — персонализированное + информация о бизнесе
     greeting = (
-        f"Привет{', ' + first_name if first_name else ''}!\n\n"
+        f"{personalized_greeting}\n\n"
         f"Это {settings.business_name}.\n"
         f"{settings.business_description}\n\n"
         f"Какая задача у вас есть?"

@@ -132,6 +132,34 @@ DEADLINE_LABELS: dict[str, str] = {
 }
 
 
+def get_suggested_questions_keyboard(questions: list[str]) -> InlineKeyboardMarkup:
+    """Клавиатура с предложенными вопросами от LLM.
+
+    Args:
+        questions: Список предложенных вопросов (3-4 штуки)
+
+    Returns:
+        InlineKeyboardMarkup с кнопками вопросов + кнопка "Свой вопрос"
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    # Эмодзи для вопросов
+    emojis = ["📋", "💰", "🎨", "⏰"]
+
+    # Добавляем кнопки с вопросами
+    for idx, question in enumerate(questions):
+        emoji = emojis[idx % len(emojis)]
+        # Обрезаем вопрос до 60 символов для кнопки
+        button_text = f"{emoji} {question[:60]}"
+        # Сохраняем индекс вопроса в callback_data
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"question:{idx}")])
+
+    # Добавляем кнопку "Свой вопрос"
+    buttons.append([InlineKeyboardButton(text="✍️ Свой вопрос", callback_data="question:custom")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def get_progress_indicator(current_state: str) -> str:
     """Возвращает минималистичный индикатор прогресса.
 
@@ -168,5 +196,6 @@ __all__ = [
     "get_deadline_keyboard",
     "get_free_chat_keyboard",
     "get_progress_indicator",
+    "get_suggested_questions_keyboard",
     "get_task_keyboard",
 ]

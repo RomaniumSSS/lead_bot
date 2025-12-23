@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Literal, cast
 
 from anthropic import APIStatusError, AsyncAnthropic, RateLimitError
@@ -28,11 +29,14 @@ client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 # скорости и качества для диалогов
 MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4.5"
 
+# AICODE-NOTE: Haiku для простых задач (приветствия, короткие тексты) — дешевле
+MODEL_HAIKU = "claude-haiku-4-20250514"  # Claude Haiku 4
+
 # AICODE-NOTE: Ограничиваем количество сообщений истории для экономии токенов
 MAX_HISTORY_MESSAGES = 10
 
 
-@retry(  # type: ignore[misc]
+@retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
     retry=retry_if_exception_type((RateLimitError, APIStatusError)),
@@ -339,6 +343,569 @@ async def generate_response(lead: Lead, message: str) -> LLMResponse:
         }
 
 
+async def generate_suggested_questions(lead: Lead) -> list[str]:
+    """
+    Генерирует 3-4 релевантных вопроса на основе контекста лида через Claude.
+
+    Args:
+        lead: Объект лида из БД
+
+    Returns:
+        Список из 3-4 предложенных вопросов
+    """
+    # Формируем контекст о лиде
+    lead_context = ""
+    if lead.task:
+        lead_context += f"Задача клиента: {lead.task}\n"
+    if lead.budget:
+        lead_context += f"Бюджет: {lead.budget}\n"
+    if lead.deadline:
+        lead_context += f"Срок: {lead.deadline}\n"
+    if lead.status:
+        status_labels = {
+            LeadStatus.HOT: "Горячий (готов к встрече)",
+            LeadStatus.WARM: "Тёплый (заинтересован)",
+            LeadStatus.COLD: "Холодный (пока думает)",
+            LeadStatus.NEW: "Новый",
+        }
+        lead_context += f"Статус: {status_labels.get(lead.status, lead.status.value)}\n"
+
+    # Системный промпт
+    system_prompt = f"""Ты — AI-ассистент бизнеса "{settings.business_name}".
+
+{settings.business_description}
+
+**Твоя задача:**
+На основе информации о клиенте предложить 3-4 релевантных вопроса, которые клиент может задать.
+
+**Информация о клиенте:**
+{lead_context if lead_context else "Минимальная информация"}
+
+**ВАЖНЫЕ ПРАВИЛА:**
+1. Вопросы должны быть КОНКРЕТНЫМИ и ПОЛЕЗНЫМИ для данного клиента.
+2. Учитывай контекст: задачу, бюджет, срок, статус.
+3. Вопросы должны помогать клиенту двигаться к решению (понять стоимость, сроки, процесс).
+4. Формулируй от первого лица клиента (как будто он спрашивает).
+5. КРАТКИЕ вопросы (максимум 8-10 слов).
+
+**Примеры хороших вопросов:**
+- "Сколько времени займёт работа?"
+- "Можно разбить оплату на этапы?"
+- "Покажете примеры похожих проектов?"
+- "Какие гарантии вы даёте?"
+
+**Плохие примеры (слишком общие):**
+- "Расскажите о вашей компании"
+- "Что вы делаете?"
+
+**Формат ответа:**
+Верни ТОЛЬКО JSON в формате:
+{{
+    "questions": ["Вопрос 1", "Вопрос 2", "Вопрос 3", "Вопрос 4"]
+}}
+
+Количество вопросов: ровно 3 или 4."""
+
+    try:
+        # Запрос к Claude API
+        response = await _call_claude(
+            client=client,
+            model=MODEL,
+            max_tokens=256,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": "Предложи релевантные вопросы для этого клиента."}
+            ],
+            use_cache=True,  # Кэшируем системный промпт
+        )
+
+        first_block = response.content[0]
+        if not isinstance(first_block, TextBlock):
+            logger.error(f"Claude вернул неожиданный тип блока: {type(first_block)}")
+            return _get_fallback_questions(lead.status)
+
+        response_text = first_block.text.strip()
+
+        # Логируем использование кэша
+        usage = response.usage
+        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
+            logger.info(
+                f"Claude SUGGESTED_QUESTIONS для лида {lead.id}: cache hit "
+                f"({usage.cache_read_input_tokens} cached tokens)"
+            )
+
+        # Очищаем от markdown
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        # Парсим JSON
+        parsed = json.loads(response_text)
+        questions: list[str] = parsed.get("questions", [])
+
+        # Валидация: должно быть 3-4 вопроса
+        if not questions or len(questions) < 3:
+            logger.warning(f"Claude вернул недостаточно вопросов: {questions}")
+            return _get_fallback_questions(lead.status)
+
+        # Обрезаем до 4 вопросов
+        return questions[:4]
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации вопросов через Claude: {e}", exc_info=True)
+        return _get_fallback_questions(lead.status)
+
+
+def _get_fallback_questions(status: LeadStatus) -> list[str]:
+    """Возвращает fallback вопросы на основе статуса лида.
+
+    Args:
+        status: Статус лида
+
+    Returns:
+        Список из 3-4 предопределённых вопросов
+    """
+    # AICODE-NOTE: Fallback на случай если Claude не сгенерирует вопросы
+    if status == LeadStatus.HOT:
+        return [
+            "Когда можем созвониться?",
+            "Какие документы нужны для старта?",
+            "Можно обсудить детали сегодня?",
+        ]
+    if status == LeadStatus.WARM:
+        return [
+            "Сколько займёт работа?",
+            "Можно разбить оплату на этапы?",
+            "Покажете примеры работ?",
+        ]
+    # COLD или NEW
+    return [
+        "Какие услуги вы предлагаете?",
+        "Сколько стоят ваши услуги?",
+        "Как проходит работа?",
+    ]
+
+
+async def generate_lead_summary(lead: Lead) -> str:
+    """
+    Генерирует краткое резюме диалога с лидом для владельца бизнеса.
+
+    Args:
+        lead: Объект лида из БД
+
+    Returns:
+        Краткое резюме (2-3 предложения)
+    """
+    # Загружаем последние сообщения диалога (последние 20 для контекста)
+    conversation_history: list[Conversation] = (
+        await Conversation.filter(lead=lead).order_by("-created_at").limit(20)
+    )
+    conversation_history = list(reversed(conversation_history))
+
+    # Формируем историю диалога для контекста
+    dialogue_text = ""
+    for conv in conversation_history[-10:]:  # Берём последние 10 для компактности
+        role_name = "Клиент" if conv.role.value == "user" else "Бот"
+        dialogue_text += f"{role_name}: {conv.content}\n"
+
+    # Формируем контекст о лиде
+    lead_context = ""
+    if lead.task:
+        lead_context += f"Задача: {lead.task}\n"
+    if lead.budget:
+        lead_context += f"Бюджет: {lead.budget}\n"
+    if lead.deadline:
+        lead_context += f"Срок: {lead.deadline}\n"
+    if lead.status:
+        status_labels = {
+            LeadStatus.HOT: "Горячий",
+            LeadStatus.WARM: "Тёплый",
+            LeadStatus.COLD: "Холодный",
+            LeadStatus.NEW: "Новый",
+        }
+        lead_context += f"Статус: {status_labels.get(lead.status, lead.status.value)}\n"
+
+    # Системный промпт
+    system_prompt = f"""Ты — AI-ассистент для владельца бизнеса "{settings.business_name}".
+
+{settings.business_description}
+
+**Твоя задача:**
+Создать КРАТКОЕ резюме диалога с клиентом для владельца бизнеса.
+
+**ВАЖНЫЕ ПРАВИЛА:**
+1. Резюме должно быть ОЧЕНЬ КОРОТКИМ: 2-3 предложения (максимум 150 символов).
+2. Включай только КЛЮЧЕВУЮ информацию: что хочет клиент, бюджет, срок, уровень готовности.
+3. Пиши деловым тоном, БЕЗ воды и лишних слов.
+4. Если клиент готов к встрече — обязательно укажи это.
+5. НЕ повторяй очевидное из структурированных данных.
+
+**Информация о клиенте:**
+{lead_context}
+
+**История диалога (последние сообщения):**
+{dialogue_text if dialogue_text else "Нет сообщений"}
+
+**Формат ответа:**
+Верни ТОЛЬКО JSON в формате:
+{{
+    "summary": "Краткое резюме в 2-3 предложения"
+}}
+
+**Примеры хороших резюме:**
+- "Ищет разработку корпоративного сайта с CRM. Бюджет 150к, запуск через 2 недели.
+  Готов обсудить сегодня."
+- "Интересуется дизайном для кафе. Средний бюджет, срок нормальный.
+  Хочет посмотреть примеры работ."
+- "Спрашивал про услуги, но пока не определился с задачей и бюджетом."
+
+**Плохие примеры (слишком длинные, вода):**
+- "Клиент написал нам и рассказал, что он хочет разработать сайт.
+  Он сказал, что у него есть бюджет..."
+"""
+
+    try:
+        # Запрос к Claude API
+        response = await _call_claude(
+            client=client,
+            model=MODEL,
+            max_tokens=128,  # Короткое резюме
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Создай краткое резюме для владельца."}],
+            use_cache=True,  # Кэшируем системный промпт
+        )
+
+        first_block = response.content[0]
+        if not isinstance(first_block, TextBlock):
+            logger.error(f"Claude вернул неожиданный тип блока: {type(first_block)}")
+            return _get_fallback_summary(lead)
+
+        response_text = first_block.text.strip()
+
+        # Логируем использование кэша
+        usage = response.usage
+        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
+            logger.info(
+                f"Claude LEAD_SUMMARY для лида {lead.id}: cache hit "
+                f"({usage.cache_read_input_tokens} cached tokens)"
+            )
+
+        # Очищаем от markdown
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        # Парсим JSON
+        parsed = json.loads(response_text)
+        summary: str = parsed.get("summary", "")
+
+        if summary:
+            # Успешно сгенерировано резюме
+            return summary
+
+        # Пустое резюме — используем fallback
+        logger.warning(f"Claude вернул пустое резюме для лида {lead.id}")
+        return _get_fallback_summary(lead)
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации резюме через Claude: {e}", exc_info=True)
+        return _get_fallback_summary(lead)
+
+
+def _get_fallback_summary(lead: Lead) -> str:
+    """Возвращает fallback резюме на основе данных лида.
+
+    Args:
+        lead: Объект лида
+
+    Returns:
+        Простое резюме на основе структурированных данных
+    """
+    # AICODE-NOTE: Fallback на случай если Claude не сгенерирует резюме
+    parts = []
+
+    if lead.task:
+        parts.append(f"Задача: {lead.task}")
+
+    if lead.budget:
+        parts.append(f"Бюджет: {lead.budget}")
+
+    if lead.deadline:
+        parts.append(f"Срок: {lead.deadline}")
+
+    if not parts:
+        return "Новый лид, информация уточняется."
+
+    return ". ".join(parts) + "."
+
+
+async def generate_greeting(lead: Lead) -> str:
+    """
+    Генерирует персонализированное приветствие для лида.
+
+    Использует Claude Haiku (дешевле) для генерации короткого приветствия
+    на основе времени суток и имени пользователя.
+
+    Args:
+        lead: Объект лида из БД
+
+    Returns:
+        Персонализированное приветствие (2-3 предложения)
+    """
+    now = datetime.now(tz=UTC)
+    hour = now.hour
+
+    # Определяем время суток
+    if 5 <= hour < 12:
+        time_of_day = "утро"
+        greeting_word = "Доброе утро"
+    elif 12 <= hour < 17:
+        time_of_day = "день"
+        greeting_word = "Добрый день"
+    elif 17 <= hour < 22:
+        time_of_day = "вечер"
+        greeting_word = "Добрый вечер"
+    else:
+        time_of_day = "ночь"
+        greeting_word = "Доброй ночи"
+
+    # Имя лида
+    lead_name = lead.first_name or lead.username or "друг"
+
+    # Определяем, возвращается ли лид
+    is_returning = lead.status != LeadStatus.NEW or (lead.task is not None)
+
+    # Системный промпт
+    system_prompt = f"""Ты — AI-ассистент бизнеса "{settings.business_name}".
+
+{settings.business_description}
+
+**Твоя задача:**
+Создать КОРОТКОЕ дружелюбное приветствие для клиента.
+
+**Контекст:**
+- Время суток: {time_of_day} ({greeting_word})
+- Имя клиента: {lead_name}
+- {"Клиент возвращается (уже общался с нами)" if is_returning else "Новый клиент"}
+
+**ВАЖНЫЕ ПРАВИЛА:**
+1. Приветствие должно быть ОЧЕНЬ КОРОТКИМ: 1-2 предложения (максимум 100 символов).
+2. Используй время суток естественно (не обязательно говорить "{greeting_word}").
+3. Тон: дружелюбный, профессиональный, тёплый, но не навязчивый.
+4. НЕ дублируй информацию, которая будет в основном сообщении.
+5. {"Упомяни что рад снова видеть" if is_returning else "Приветствуй как нового клиента"}.
+
+**Формат ответа:**
+Верни ТОЛЬКО JSON в формате:
+{{
+    "greeting": "Короткое приветствие в 1-2 предложения"
+}}
+
+**Примеры хороших приветствий:**
+- "Доброе утро, Иван! 👋 Рад помочь!"
+- "Привет, Мария! Снова рад видеть. Чем помочь?"
+- "Добрый вечер! Готов ответить на вопросы."
+
+**Плохие примеры (слишком длинные):**
+- "Доброе утро, Иван! Я AI-ассистент компании WebStudio. Мы занимаемся разработкой..."
+"""
+
+    try:
+        # Запрос к Claude Haiku (дешевле для простых задач)
+        response = await _call_claude(
+            client=client,
+            model=MODEL_HAIKU,  # Используем Haiku для экономии
+            max_tokens=64,  # Очень короткий ответ
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Создай приветствие."}],
+            use_cache=False,  # Не кэшируем — каждое приветствие уникально (время меняется)
+        )
+
+        first_block = response.content[0]
+        if not isinstance(first_block, TextBlock):
+            logger.error(f"Claude вернул неожиданный тип блока: {type(first_block)}")
+            return _get_fallback_greeting(greeting_word, lead_name, is_returning)
+
+        response_text = first_block.text.strip()
+
+        # Очищаем от markdown
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        # Парсим JSON
+        parsed = json.loads(response_text)
+        greeting: str = parsed.get("greeting", "")
+
+        if greeting:
+            logger.info(f"Claude Haiku GREETING для лида {lead.id}: {greeting}")
+            return greeting
+
+        # Пустое приветствие — используем fallback
+        logger.warning(f"Claude вернул пустое приветствие для лида {lead.id}")
+        return _get_fallback_greeting(greeting_word, lead_name, is_returning)
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации приветствия через Claude: {e}", exc_info=True)
+        return _get_fallback_greeting(greeting_word, lead_name, is_returning)
+
+
+def _get_fallback_greeting(greeting_word: str, name: str, is_returning: bool) -> str:
+    """Возвращает fallback приветствие.
+
+    Args:
+        greeting_word: Приветствие в зависимости от времени суток
+        name: Имя лида
+        is_returning: Возвращается ли лид
+
+    Returns:
+        Простое приветствие
+    """
+    # AICODE-NOTE: Fallback на случай если Claude не сгенерирует приветствие
+    if is_returning:
+        return f"Привет, {name}! 👋 Снова рад видеть!"
+    return f"{greeting_word}, {name}! 👋"
+
+
+async def generate_followup_message(lead: Lead, days_since_last: int) -> str:
+    """
+    Генерирует персонализированное follow-up сообщение для лида.
+
+    Args:
+        lead: Объект лида из БД
+        days_since_last: Количество дней с последнего сообщения
+
+    Returns:
+        Follow-up сообщение (2-3 предложения)
+    """
+    # Формируем контекст о лиде
+    lead_context = ""
+    if lead.task:
+        lead_context += f"Задача клиента: {lead.task}\n"
+    if lead.budget:
+        lead_context += f"Бюджет: {lead.budget}\n"
+    if lead.status:
+        status_labels = {
+            LeadStatus.HOT: "Горячий (готов к встрече)",
+            LeadStatus.WARM: "Тёплый (заинтересован)",
+            LeadStatus.COLD: "Холодный (пока думает)",
+            LeadStatus.NEW: "Новый",
+        }
+        lead_context += f"Статус: {status_labels.get(lead.status, lead.status.value)}\n"
+
+    # Имя лида
+    lead_name = lead.first_name or lead.username or "друг"
+
+    # Системный промпт
+    system_prompt = f"""Ты — AI-ассистент бизнеса "{settings.business_name}".
+
+{settings.business_description}
+
+**Твоя задача:**
+Создать МЯГКОЕ напоминание для клиента, который не отвечал {days_since_last} дней.
+
+**Информация о клиенте:**
+{lead_context if lead_context else "Минимальная информация"}
+
+**ВАЖНЫЕ ПРАВИЛА:**
+1. Сообщение должно быть КОРОТКИМ: 2-3 предложения (максимум 150 символов).
+2. Тон: дружелюбный, ненавязчивый, мягкий.
+3. НЕ давить на клиента — просто напомнить о себе.
+4. Предложить помощь, если вопросы остались актуальны.
+5. {"Упомяни задачу клиента" if lead.task else "Будь общим"}.
+
+**Формат ответа:**
+Верни ТОЛЬКО JSON в формате:
+{{
+    "message": "Короткое follow-up сообщение в 2-3 предложения"
+}}
+
+**Примеры хороших follow-up:**
+- "Привет! 👋 Вижу, вы интересовались дизайном сайта. Если актуально — с радостью
+  отвечу на вопросы!"
+- "Здравствуйте! Если вопрос по разработке всё ещё актуален — готов помочь."
+- "Привет! Напоминаю о себе. Если нужна помощь — пишите!"
+
+**Плохие примеры (слишком навязчиво):**
+- "Почему вы не отвечаете? Давайте назначим встречу!"
+"""
+
+    try:
+        # Запрос к Claude Haiku
+        response = await _call_claude(
+            client=client,
+            model=MODEL_HAIKU,
+            max_tokens=128,
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Создай follow-up сообщение."}],
+            use_cache=True,  # Кэшируем системный промпт
+        )
+
+        first_block = response.content[0]
+        if not isinstance(first_block, TextBlock):
+            logger.error(f"Claude вернул неожиданный тип блока: {type(first_block)}")
+            return _get_fallback_followup(lead_name, lead.task)
+
+        response_text = first_block.text.strip()
+
+        # Очищаем от markdown
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        # Парсим JSON
+        parsed = json.loads(response_text)
+        message: str = parsed.get("message", "")
+
+        if message:
+            logger.info(f"Claude Haiku FOLLOWUP для лида {lead.id}: {message}")
+            return message
+
+        # Пустое сообщение — используем fallback
+        logger.warning(f"Claude вернул пустое follow-up для лида {lead.id}")
+        return _get_fallback_followup(lead_name, lead.task)
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации follow-up через Claude: {e}", exc_info=True)
+        return _get_fallback_followup(lead_name, lead.task)
+
+
+def _get_fallback_followup(name: str, task: str | None) -> str:
+    """Возвращает fallback follow-up сообщение.
+
+    Args:
+        name: Имя лида
+        task: Задача лида (если есть)
+
+    Returns:
+        Простое follow-up сообщение
+    """
+    # AICODE-NOTE: Fallback на случай если Claude не сгенерирует follow-up
+    if task:
+        return (
+            f"Привет, {name}! 👋\n\n"
+            f"Вижу, вы интересовались: {task}.\n"
+            f"Если актуально — с радостью помогу!"
+        )
+    return f"Привет, {name}! 👋\n\nНапоминаю о себе. Если есть вопросы — пишите!"
+
+
 async def parse_custom_meeting_time(text: str) -> dict[str, str] | None:
     """
     Парсит произвольное время встречи через Claude API.
@@ -354,8 +921,6 @@ async def parse_custom_meeting_time(text: str) -> dict[str, str] | None:
     Returns:
         dict с полями date (YYYY-MM-DD) и time (HH:MM) или None если не удалось распарсить
     """
-    from datetime import UTC, datetime
-
     now = datetime.now(tz=UTC)
     weekdays_ru = [
         "понедельник",

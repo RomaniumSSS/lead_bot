@@ -4,7 +4,43 @@ from aiogram import Bot
 
 from src.config import settings
 from src.database.models import Lead, LeadStatus, Meeting
+from src.services.llm import generate_lead_summary
 from src.utils.logger import logger
+
+
+def _get_status_emoji_and_text(status: LeadStatus) -> tuple[str, str]:
+    """Возвращает эмодзи и текст для статуса лида.
+
+    Args:
+        status: Статус лида
+
+    Returns:
+        Кортеж (эмодзи, текст статуса)
+    """
+    if status == LeadStatus.HOT:
+        return "🔥", "ГОРЯЧИЙ"
+    if status == LeadStatus.WARM:
+        return "🟡", "ТЁПЛЫЙ"
+    return "⚪️", "Новый"
+
+
+def _get_fallback_summary_from_lead(lead: Lead) -> str:
+    """Создаёт простое резюме из структурированных данных лида.
+
+    Args:
+        lead: Объект лида
+
+    Returns:
+        Простое резюме
+    """
+    summary_parts = []
+    if lead.task:
+        summary_parts.append(f"Задача: {lead.task}")
+    if lead.budget:
+        summary_parts.append(f"Бюджет: {lead.budget}")
+    if lead.deadline:
+        summary_parts.append(f"Срок: {lead.deadline}")
+    return ". ".join(summary_parts) + "." if summary_parts else "Информация уточняется."
 
 
 async def notify_owner_about_lead(lead: Lead) -> None:
@@ -28,40 +64,40 @@ async def notify_owner_about_lead(lead: Lead) -> None:
 
     try:
         # Формируем эмодзи и текст в зависимости от статуса
-        emoji: str
-        status_text: str
-        if lead.status == LeadStatus.HOT:
-            emoji = "🔥"
-            status_text = "ГОРЯЧИЙ"
-        elif lead.status == LeadStatus.WARM:
-            emoji = "🟡"
-            status_text = "ТЁПЛЫЙ"
-        else:
-            emoji = "⚪️"
-            status_text = "Новый"
+        emoji, status_text = _get_status_emoji_and_text(lead.status)
 
         # Имя лида
         lead_name: str = lead.first_name or lead.username or f"User {lead.telegram_id}"
 
+        # Генерируем умное резюме через LLM
+        try:
+            summary = await generate_lead_summary(lead)
+        except Exception as e:
+            logger.error(f"Ошибка генерации резюме для лида {lead.id}: {e}")
+            summary = _get_fallback_summary_from_lead(lead)
+
         # Формируем текст уведомления (используем HTML для надежности)
         notification: str = (
-            f"{emoji} <b>Новый {status_text} лид!</b>\n\n👤 <b>Имя</b>: {lead_name}\n"
+            f"{emoji} <b>Новый {status_text} лид!</b>\n\n"
+            f"📝 <b>Резюме:</b> {summary}\n\n"
+            f"👤 <b>Имя:</b> {lead_name}\n"
         )
 
+        # Добавляем структурированные данные (если они есть)
         if lead.task:
-            notification += f"📋 <b>Задача</b>: {lead.task}\n"
+            notification += f"📋 <b>Задача:</b> {lead.task}\n"
 
         if lead.budget:
-            notification += f"💰 <b>Бюджет</b>: {lead.budget}\n"
+            notification += f"💰 <b>Бюджет:</b> {lead.budget}\n"
 
         if lead.deadline:
-            notification += f"⏰ <b>Срок</b>: {lead.deadline}\n"
+            notification += f"⏰ <b>Срок:</b> {lead.deadline}\n"
 
         # Ссылка на пользователя
         if lead.username:
-            notification += f"\n<b>Telegram</b>: @{lead.username}"
+            notification += f"\n<b>Telegram:</b> @{lead.username}"
         else:
-            notification += f"\n<b>Telegram ID</b>: <code>{lead.telegram_id}</code>"
+            notification += f"\n<b>Telegram ID:</b> <code>{lead.telegram_id}</code>"
 
         # Отправляем уведомление владельцу
         await bot.send_message(

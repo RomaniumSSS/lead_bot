@@ -39,7 +39,7 @@ class MeetingStatus(str, Enum):
 class Lead(Model):
     """Модель лида (потенциального клиента)."""
 
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
     telegram_id = fields.BigIntField(unique=True, description="Telegram User ID")
     # AICODE-NOTE: Tortoise ORM не поддерживает аннотации типов напрямую,
     # используем type: ignore для совместимости с MyPy
@@ -80,7 +80,7 @@ class Lead(Model):
 class Conversation(Model):
     """Модель диалога (история сообщений)."""
 
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
     lead: fields.ForeignKeyRelation[Lead] = fields.ForeignKeyField(
         "models.Lead",
         related_name="conversations",
@@ -105,7 +105,7 @@ class Conversation(Model):
 class Meeting(Model):
     """Модель встречи с лидом."""
 
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
     lead: fields.ForeignKeyRelation[Lead] = fields.ForeignKeyField(
         "models.Lead",
         related_name="meetings",

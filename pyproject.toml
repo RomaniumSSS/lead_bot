@@ -108,6 +108,11 @@ module = [
 disallow_untyped_decorators = false
 disallow_subclassing_any = false
 
+# Для сервисов с tenacity - разрешаем untyped декораторы (@retry)
+[[tool.mypy.overrides]]
+module = "src.services.llm"
+disallow_untyped_decorators = false
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
@@ -142,8 +147,6 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "ANN101",   # missing-type-self
-    "ANN102",   # missing-type-cls
     "ANN401",   # dynamically-typed-expression (Any is needed for middleware)
     "COM812",   # trailing-comma-missing (conflicts with formatter)
     "ISC001",   # single-line-implicit-string-concatenation (conflicts with formatter)
@@ -161,3 +164,4 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # unused imports in __init__ are ok
+"src/handlers/conversation.py" = ["PLC0415"]  # dynamic imports to avoid circular deps
