@@ -116,13 +116,16 @@ async def notify_owner_about_lead(lead: Lead) -> None:
         await bot.session.close()
 
 
-async def notify_owner_meeting_scheduled(lead: Lead, meeting: Meeting) -> None:
+async def notify_owner_meeting_scheduled(
+    lead: Lead, meeting: Meeting, include_lead_status: bool = True
+) -> None:
     """
     Отправляет уведомление владельцу о назначенной встрече.
 
     Args:
         lead: Объект лида из БД
         meeting: Объект встречи из БД
+        include_lead_status: Включать ли статус лида в уведомление (для объединения уведомлений)
     """
     # Проверяем что owner_telegram_id настроен
     if settings.owner_telegram_id is None:
@@ -138,11 +141,17 @@ async def notify_owner_meeting_scheduled(lead: Lead, meeting: Meeting) -> None:
         # Форматируем время встречи
         time_str = meeting.scheduled_at.strftime("%d.%m.%Y в %H:%M")
 
+        # Определяем заголовок в зависимости от статуса лида
+        if include_lead_status and lead.status == LeadStatus.HOT:
+            header = "🔥📅 <b>ГОРЯЧИЙ лид назначил встречу!</b>"
+        elif include_lead_status and lead.status == LeadStatus.WARM:
+            header = "🟡📅 <b>Тёплый лид назначил встречу!</b>"
+        else:
+            header = "📅 <b>Новая встреча назначена!</b>"
+
         # Формируем текст уведомления (используем HTML для надежности)
         notification = (
-            f"📅 <b>Новая встреча назначена!</b>\n\n"
-            f"👤 <b>Имя</b>: {lead_name}\n"
-            f"⏰ <b>Время</b>: {time_str}\n"
+            f"{header}\n\n" f"👤 <b>Имя</b>: {lead_name}\n" f"⏰ <b>Время</b>: {time_str}\n"
         )
 
         # Добавляем информацию о задаче, бюджете, сроке (если есть)

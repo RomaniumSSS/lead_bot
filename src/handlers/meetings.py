@@ -138,7 +138,7 @@ def _generate_meeting_slots() -> list[datetime]:
 
 
 @router.callback_query(F.data.startswith("meeting:"))
-async def handle_meeting_selection(callback: CallbackQuery, state: FSMContext) -> None:  # noqa: PLR0911, PLR0912
+async def handle_meeting_selection(callback: CallbackQuery, state: FSMContext) -> None:  # noqa: PLR0911, PLR0912, PLR0915
     """
     Обрабатывает выбор времени встречи лидом.
 
@@ -233,9 +233,11 @@ async def handle_meeting_selection(callback: CallbackQuery, state: FSMContext) -
 
     logger.info(f"Создана встреча {meeting.id} для лида {lead.id} на {scheduled_at}")
 
-    # Уведомляем владельца о встрече
+    # Уведомляем владельца о встрече (объединённое уведомление с информацией о статусе лида)
     try:
-        await notify_owner_meeting_scheduled(lead, meeting)
+        await notify_owner_meeting_scheduled(lead, meeting, include_lead_status=True)
+        # Сбрасываем флаг отложенного уведомления (если был)
+        await state.update_data(pending_lead_notification=False)
     except Exception as e:
         logger.error(f"Ошибка при уведомлении владельца о встрече {meeting.id}: {e}")
 
@@ -319,8 +321,10 @@ async def handle_custom_meeting_time(message: Message, state: FSMContext) -> Non
 
     logger.info(f"Создана встреча {meeting.id} для лида {lead.id} на {scheduled_at} (custom time)")
 
-    # Уведомляем владельца
+    # Уведомляем владельца о встрече (объединённое уведомление с информацией о статусе лида)
     try:
-        await notify_owner_meeting_scheduled(lead, meeting)
+        await notify_owner_meeting_scheduled(lead, meeting, include_lead_status=True)
+        # Сбрасываем флаг отложенного уведомления (если был)
+        await state.update_data(pending_lead_notification=False)
     except Exception as e:
         logger.error(f"Ошибка при уведомлении владельца о встрече {meeting.id}: {e}")

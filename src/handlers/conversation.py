@@ -292,12 +292,11 @@ async def handle_deadline_callback(callback: CallbackQuery, state: FSMContext) -
     await state.set_state(ConversationState.ACTION)
     await callback.answer()
 
-    # Уведомляем владельца только при ПОВЫШЕНИИ статуса до HOT или WARM
+    # Сохраняем флаг для отложенного уведомления (если лид назначит встречу — уведомим там)
+    # AICODE-NOTE: Уведомление о лиде отправляется позже, чтобы не спамить двумя сообщениями
     if status_upgraded and new_status in [LeadStatus.HOT, LeadStatus.WARM]:
-        try:
-            await notify_owner_about_lead(lead)
-        except Exception as e:
-            logger.error(f"Ошибка уведомления владельца о лиде {lead.id}: {e}")
+        await state.update_data(pending_lead_notification=True)
+        logger.info(f"Отложено уведомление о лиде {lead.id} (pending_lead_notification=True)")
 
 
 @router.callback_query(F.data.startswith("question:"))
@@ -387,8 +386,24 @@ async def handle_question_callback(callback: CallbackQuery, state: FSMContext) -
         await callback.answer("Ошибка: неверный формат вопроса", show_alert=True)
 
 
+async def _send_pending_lead_notification(lead: Lead, state: FSMContext) -> None:
+    """Отправляет отложенное уведомление о лиде, если оно есть.
+
+    Args:
+        lead: Объект лида
+        state: FSM context для проверки флага
+    """
+    fsm_data = await state.get_data()
+    if fsm_data.get("pending_lead_notification"):
+        try:
+            await notify_owner_about_lead(lead)
+            await state.update_data(pending_lead_notification=False)
+        except Exception as e:
+            logger.error(f"Ошибка отправки отложенного уведомления о лиде {lead.id}: {e}")
+
+
 @router.callback_query(F.data.startswith("action:"))
-async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> None:
+async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> None:  # noqa: PLR0912
     """Обработка кнопок действий после квалификации."""
     if not callback.data or not callback.message or not callback.from_user:
         return
@@ -407,6 +422,8 @@ async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> 
     show_meeting = lead.status != LeadStatus.COLD if lead else True
 
     if action == "schedule_meeting":
+        # AICODE-NOTE: Здесь НЕ отправляем pending уведомление — оно отправится
+        # в meetings.py вместе с уведомлением о встрече (объединённое)
         # Защита: холодным лидам не даём назначать встречу
         if lead and lead.status == LeadStatus.COLD:
             await callback.message.answer(
@@ -429,6 +446,10 @@ async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> 
         await _send_materials(callback.message, lead)
         await callback.answer()
 
+        # Отправляем отложенное уведомление о лиде (если есть)
+        if lead:
+            await _send_pending_lead_notification(lead, state)
+
         # Переход в свободный диалог
         await callback.message.answer(
             "Если есть вопросы — пишите, отвечу.",
@@ -437,6 +458,9 @@ async def handle_action_callback(callback: CallbackQuery, state: FSMContext) -> 
         await state.set_state(ConversationState.FREE_CHAT)
 
     elif action == "free_chat":
+        # Отправляем отложенное уведомление о лиде (если есть)
+        if lead:
+            await _send_pending_lead_notification(lead, state)
         # Генерируем предложенные вопросы через LLM
         if lead:
             try:
@@ -643,12 +667,10 @@ async def handle_deadline_custom_input(message: Message, state: FSMContext) -> N
 
     await state.set_state(ConversationState.ACTION)
 
-    # Уведомляем владельца только при ПОВЫШЕНИИ статуса до HOT или WARM
+    # Сохраняем флаг для отложенного уведомления (если лид назначит встречу — уведомим там)
     if status_upgraded and new_status in [LeadStatus.HOT, LeadStatus.WARM]:
-        try:
-            await notify_owner_about_lead(lead)
-        except Exception as e:
-            logger.error(f"Ошибка уведомления владельца о лиде {lead.id}: {e}")
+        await state.update_data(pending_lead_notification=True)
+        logger.info(f"Отложено уведомление о лиде {lead.id} (pending_lead_notification=True)")
 
 
 async def _handle_free_chat_logic(message: Message, state: FSMContext) -> None:
