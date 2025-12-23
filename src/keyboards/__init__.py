@@ -18,19 +18,26 @@ def get_task_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_budget_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора бюджета (этап BUDGET)."""
+    """Клавиатура выбора бюджета (этап BUDGET).
+
+    Включает кнопку для ввода своего варианта текстом.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💰 До 50 000 ₽", callback_data="budget:low")],
             [InlineKeyboardButton(text="💰 50 000 - 150 000 ₽", callback_data="budget:medium")],
             [InlineKeyboardButton(text="💰 150 000+ ₽", callback_data="budget:high")],
             [InlineKeyboardButton(text="🤷 Пока не знаю", callback_data="budget:unknown")],
+            [InlineKeyboardButton(text="✍️ Свой вариант", callback_data="budget:custom")],
         ]
     )
 
 
 def get_deadline_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора срока (этап DEADLINE)."""
+    """Клавиатура выбора срока (этап DEADLINE).
+
+    Включает кнопку для ввода своего варианта текстом.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -44,6 +51,7 @@ def get_deadline_keyboard() -> InlineKeyboardMarkup:
                     text="📅 Не срочно (есть время)", callback_data="deadline:later"
                 )
             ],
+            [InlineKeyboardButton(text="✍️ Свой вариант", callback_data="deadline:custom")],
         ]
     )
 
@@ -160,6 +168,36 @@ def get_suggested_questions_keyboard(questions: list[str]) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def get_meeting_suggestion_keyboard(show_continue: bool = True) -> InlineKeyboardMarkup:
+    """Клавиатура с явным предложением встречи после N вопросов в FREE_CHAT.
+
+    Args:
+        show_continue: Показывать ли кнопку "Продолжить общение".
+
+    Returns:
+        InlineKeyboardMarkup с акцентом на кнопке встречи.
+    """
+    buttons: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                text="📅 Назначить встречу — обсудим детали",
+                callback_data="action:schedule_meeting",
+            )
+        ],
+    ]
+
+    if show_continue:
+        buttons.append(
+            [InlineKeyboardButton(text="💬 Продолжить общение", callback_data="action:free_chat")]
+        )
+
+    buttons.append(
+        [InlineKeyboardButton(text="📂 Получить материалы", callback_data="action:send_materials")]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def get_progress_indicator(current_state: str) -> str:
     """Возвращает минималистичный индикатор прогресса.
 
@@ -195,6 +233,7 @@ __all__ = [
     "get_budget_keyboard",
     "get_deadline_keyboard",
     "get_free_chat_keyboard",
+    "get_meeting_suggestion_keyboard",
     "get_progress_indicator",
     "get_suggested_questions_keyboard",
     "get_task_keyboard",

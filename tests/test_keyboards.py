@@ -54,10 +54,10 @@ class TestBudgetKeyboard:
         kb = get_budget_keyboard()
         assert isinstance(kb, InlineKeyboardMarkup)
 
-    def test_has_4_budget_options(self) -> None:
-        """Содержит 4 варианта бюджета."""
+    def test_has_5_budget_options(self) -> None:
+        """Содержит 5 вариантов бюджета (включая 'Свой вариант')."""
         kb = get_budget_keyboard()
-        assert len(kb.inline_keyboard) == 4
+        assert len(kb.inline_keyboard) == 5
 
     def test_all_buttons_have_callback_data(self) -> None:
         """Все кнопки имеют callback_data."""
@@ -76,10 +76,10 @@ class TestDeadlineKeyboard:
         kb = get_deadline_keyboard()
         assert isinstance(kb, InlineKeyboardMarkup)
 
-    def test_has_3_deadline_options(self) -> None:
-        """Содержит 3 варианта срока."""
+    def test_has_4_deadline_options(self) -> None:
+        """Содержит 4 варианта срока (включая 'Свой вариант')."""
         kb = get_deadline_keyboard()
-        assert len(kb.inline_keyboard) == 3
+        assert len(kb.inline_keyboard) == 4
 
 
 class TestActionKeyboard:

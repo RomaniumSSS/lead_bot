@@ -228,6 +228,9 @@ async def handle_meeting_selection(callback: CallbackQuery, state: FSMContext) -
 
     await callback.answer()
 
+    # AICODE-NOTE: Устанавливаем FREE_CHAT чтобы пользователь мог продолжить диалог
+    await state.set_state(ConversationState.FREE_CHAT)
+
     logger.info(f"Создана встреча {meeting.id} для лида {lead.id} на {scheduled_at}")
 
     # Уведомляем владельца о встрече
@@ -311,8 +314,8 @@ async def handle_custom_meeting_time(message: Message, state: FSMContext) -> Non
         f"Если что-то изменится — напишите."
     )
 
-    # Очищаем state
-    await state.clear()
+    # AICODE-NOTE: Переводим в FREE_CHAT вместо clear() чтобы пользователь мог продолжить диалог
+    await state.set_state(ConversationState.FREE_CHAT)
 
     logger.info(f"Создана встреча {meeting.id} для лида {lead.id} на {scheduled_at} (custom time)")
 

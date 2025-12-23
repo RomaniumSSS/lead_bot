@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     cases_url: str | None = None
     presentation_url: str | None = None
 
+    # FREE_CHAT settings
+    free_chat_max_questions: int = 5  # После N вопросов предложить встречу
+
 
 # Глобальный экземпляр настроек
 # AICODE-NOTE: Settings автоматически загружает переменные из .env

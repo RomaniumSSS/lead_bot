@@ -26,4 +26,6 @@ class ConversationState(StatesGroup):
 
     # Дополнительные states: ожидание пользовательского ввода
     TASK_CUSTOM_INPUT = State()  # Ожидание ввода своей задачи
+    BUDGET_CUSTOM_INPUT = State()  # Ожидание ввода своего бюджета
+    DEADLINE_CUSTOM_INPUT = State()  # Ожидание ввода своего срока
     MEETING_CUSTOM_TIME = State()  # Ожидание ввода своего времени встречи

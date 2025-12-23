@@ -30,7 +30,7 @@ client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4.5"
 
 # AICODE-NOTE: Haiku для простых задач (приветствия, короткие тексты) — дешевле
-MODEL_HAIKU = "claude-haiku-4-20250514"  # Claude Haiku 4
+MODEL_HAIKU = "claude-3-5-haiku-20241022"  # Claude 3.5 Haiku (актуальная версия)
 
 # AICODE-NOTE: Ограничиваем количество сообщений истории для экономии токенов
 MAX_HISTORY_MESSAGES = 10
