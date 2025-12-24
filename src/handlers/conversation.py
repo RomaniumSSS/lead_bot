@@ -755,9 +755,9 @@ async def _handle_free_chat_logic(message: Message, state: FSMContext) -> None:
 
 
 @router.message(ConversationState.FREE_CHAT, F.text)
-async def handle_free_chat(message: Message, _state: FSMContext) -> None:
+async def handle_free_chat(message: Message, state: FSMContext) -> None:
     """Обработка сообщений в свободном диалоге через LLM (FSM handler)."""
-    await _handle_free_chat_logic(message, _state)
+    await _handle_free_chat_logic(message, state)
 
 
 # =============================================================================
