@@ -18,6 +18,20 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
   bot:
     build:
       context: .
@@ -26,10 +40,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DATABASE_URL=${DATABASE_URL:-postgres://salesbot:salesbot_password@db:5432/sales_assistant}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OWNER_TELEGRAM_ID=${OWNER_TELEGRAM_ID}
       - BUSINESS_NAME=${BUSINESS_NAME}
       - BUSINESS_DESCRIPTION=${BUSINESS_DESCRIPTION}
@@ -53,3 +70,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

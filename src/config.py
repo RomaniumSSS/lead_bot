@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str
 
+    # Redis (для FSM storage)
+    redis_url: str = "redis://localhost:6379/0"
+
     # Owner (опционально для разработки)
     owner_telegram_id: int | None = None
 

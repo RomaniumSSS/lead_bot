@@ -5,7 +5,8 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
 from tortoise import Tortoise
 
 from src.config import settings
@@ -52,9 +53,9 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
     )
 
-    # AICODE-NOTE: Для MVP используем MemoryStorage.
-    # В продакшене заменить на RedisStorage для персистентности state между рестартами.
-    storage = MemoryStorage()
+    # Redis storage для персистентности FSM state между рестартами
+    redis = Redis.from_url(settings.redis_url)
+    storage = RedisStorage(redis=redis)
     dp = Dispatcher(storage=storage)
 
     # Регистрация middleware
@@ -127,6 +128,10 @@ async def main() -> None:
         # Shutdown
         await on_shutdown()
         await bot.session.close()
+
+        # Закрываем Redis соединение
+        await redis.aclose()
+        logger.info("✅ Redis соединение закрыто")
 
 
 if __name__ == "__main__":

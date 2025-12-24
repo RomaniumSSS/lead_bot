@@ -11,6 +11,7 @@
 - ✅ **Уведомления владельцу** — мгновенные уведомления о горячих и тёплых лидах.
 - ✅ **Статистика в реальном времени** — команда `/stats` для владельца.
 - ✅ **База данных PostgreSQL** — полная история диалогов и данные лидов.
+- ✅ **Redis для FSM storage** — сохранение состояния диалогов между перезапусками.
 - ✅ **Docker-ready** — простой деплой на VPS через Docker Compose.
 
 ---
@@ -54,6 +55,7 @@ make docker-logs  # Посмотреть логи
 
 - Python 3.11+
 - PostgreSQL 15+ (или Docker)
+- Redis 7+ (или Docker)
 - Telegram Bot Token (от [@BotFather](https://t.me/BotFather))
 - Anthropic API Key (от [console.anthropic.com](https://console.anthropic.com/))
 

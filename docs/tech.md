@@ -27,6 +27,7 @@
 
 ### База данных:
 - **PostgreSQL 15+** (в Docker контейнере для разработки, отдельный инстанс на VPS для продакшена).
+- **Redis 7+** — для хранения FSM состояний (aiogram RedisStorage), обеспечивает персистентность диалогов между перезапусками.
 
 ### Deployment:
 - **Docker + Docker Compose** — контейнеризация для удобного деплоя.
@@ -209,16 +210,21 @@ class ConversationState(StatesGroup):
 
 #### FSM Storage
 
-В `bot.py` используется **MemoryStorage** (для MVP):
+В `bot.py` используется **RedisStorage** для персистентности состояния диалогов:
 
 ```python
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
 
-storage = MemoryStorage()
+redis = Redis.from_url(settings.redis_url)
+storage = RedisStorage(redis=redis)
 dp = Dispatcher(storage=storage)
 ```
 
-**AICODE-NOTE:** Для продакшена заменить на RedisStorage для персистентности state между рестартами.
+**Преимущества RedisStorage:**
+- Состояние диалогов сохраняется между перезапусками бота
+- Пользователи не теряют прогресс при обновлении
+- Возможность горизонтального масштабирования (несколько инстансов бота)
 
 ---
 
@@ -489,6 +495,9 @@ ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxxx
 # PostgreSQL
 DATABASE_URL=postgres://user:password@localhost:5432/sales_assistant
 
+# Redis (для FSM storage)
+REDIS_URL=redis://localhost:6379/0
+
 # Owner (владелец бизнеса)
 OWNER_TELEGRAM_ID=123456789
 
@@ -513,8 +522,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 2. Установить зависимости
 uv sync
 
-# 3. Запустить PostgreSQL (через Docker)
-docker-compose up -d db
+# 3. Запустить PostgreSQL и Redis (через Docker)
+docker-compose up -d db redis
 
 # 4. Создать .env (скопировать из .env.example и заполнить)
 cp .env.example .env
@@ -535,7 +544,7 @@ uv run python -m src.bot
 cp .env.example .env
 # Заполнить .env
 
-# 2. Запустить всё (PostgreSQL + бот)
+# 2. Запустить всё (PostgreSQL + Redis + бот)
 docker-compose up -d
 
 # 3. Применить миграции

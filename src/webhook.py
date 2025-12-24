@@ -2,7 +2,7 @@
 
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web  # type: ignore[import-not-found]
+from aiohttp import web
 
 from src.utils.logger import logger
 
